@@ -111,7 +111,7 @@ if __name__ == '__main__':
         MI.mark_BAD_region(RAW, block=True)
 
         # Summary of BAD regions (confirm the marking)
-        MI.evaluate_BAD_region(RAW)
+        MI.evaluate_BAD_region(RAW, max_duration=fileTime)
 
         # Add Stim to RAW
         MI.make_RAW_stim(RAW, states)
@@ -148,11 +148,11 @@ if __name__ == '__main__':
         #ch_set.plot()
 
         # Here we can save RAW as .fif
-        MI.save_RAW(path=file_path+'/', file_name=base_name, label=None):
+        MI.save_RAW(RAW=RAW, path=file_path+'/', file_name=base_name, label='')
 
     else: # if clean_bool: 
         # Here we can import a previously saved .fif file
-        RAW, montage, fs = MI.import_file_fif(path=file_path+'/', file_name=base_name + '.fif'):
+        RAW, montage, fs = MI.import_file_fif(path=file_path+'/', file_name=base_name + '.fif')
         ch_set = ChannelSet(RAW.info['ch_names'][:RAW.get_data(picks='eeg').shape[0]])
 
     # Interpolate BAD channels
@@ -173,6 +173,17 @@ if __name__ == '__main__':
     RAW_SL = MI.make_RAW(signal=signalSLAP, fs=RAW.info['sfreq'], ch_names=ch_setSLAP.get_labels())
     MI.make_RAW_stim(RAW_SL, states)
     RAW_SL.set_annotations(RAW.annotations)
+    if montage_type=='DSI_24' or montage_type=='GTEC_32':
+        montage = MI.make_montage(montage_type=montage_type, 
+                                  ch_to_show=ch_setSLAP.get_labels(), 
+                                  conv_dict=None)
+
+    elif montage_type=='EGI_128':
+        montage = MI.make_montage(montage_type=montage_type, 
+                                  ch_to_show=ch_setSLAP.get_labels(), 
+                                  conv_dict=eeg_dict.stand1020_to_egi)
+    # Assign montage to RAW_SL
+    RAW_SL.set_montage(montage)
     #RAW_SL.plot()
 
 
@@ -241,7 +252,7 @@ if __name__ == '__main__':
 
     # Create statistics to test in nonparametric tests
     N = 1999
-    perm_bool = True
+    perm_bool = False
     boot_bool = True
     
     p_left = []
@@ -253,37 +264,40 @@ if __name__ == '__main__':
     isTreatment = np.arange(x.shape[0]) < psds_left_rest.shape[0]
 
     # theta
-    T = mi.SumsR2(isContralat=isRight, isIpsilat=isLeft, bins=theta_ticks)
+    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=theta_ticks)
     if perm_bool:
         p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
-        #p_left.append(p)
-        #labels.append(r'4-7 Hz')
+        p_left.append(p)
     if boot_bool:
         p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_left.append(p)
-        labels.append(r'4-7 Hz')
+        
+    labels.append(r'4-7 Hz')
+    r2_left_theta = T.DifferenceOfR2(x, isTreatment)
     
     # alpha
-    T = mi.SumsR2(isContralat=isRight, isIpsilat=isLeft, bins=alpha_ticks)
+    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=alpha_ticks)
     if perm_bool:
         p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
-        #p_left.append(p)
-        #labels.append(r'8-12 Hz')
+        p_left.append(p)
     if boot_bool:
         p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_left.append(p)
-        labels.append(r'8-12 Hz')
+
+    labels.append(r'8-12 Hz')
+    r2_left_alpha = T.DifferenceOfR2(x, isTreatment)
     
     # beta
-    T = mi.SumsR2(isContralat=isRight, isIpsilat=isLeft, bins=beta_ticks)
+    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=beta_ticks)
     if perm_bool:
         p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
-        #p_left.append(p)
-        #labels.append(r'13-30 Hz')
+        p_left.append(p)
     if boot_bool:
         p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_left.append(p)
-        labels.append(r'13-30 Hz')
+
+    labels.append(r'13-30 Hz')
+    r2_left_beta = T.DifferenceOfR2(x, isTreatment)
 
 
     # RIGHT HAND TESTS
@@ -291,39 +305,42 @@ if __name__ == '__main__':
     isTreatment = np.arange(x.shape[0]) < psds_right_rest.shape[0]
 
     # theta
-    T = mi.SumsR2(isContralat=isLeft, isIpsilat=isRight, bins=theta_ticks)
+    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=theta_ticks)
     if perm_bool:
         p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
-        #p_left.append(p)
-        #labels.append(r'4-7 Hz')
+        p_right.append(p)
     if boot_bool:
         p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
-        p_left.append(p)
-        labels.append(r'4-7 Hz')
-    
-    # alpha
-    T = mi.SumsR2(isContralat=isLeft, isIpsilat=isRight, bins=alpha_ticks)
-    if perm_bool:
-        p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
-        #p_left.append(p)
-        #labels.append(r'8-12 Hz')
-    if boot_bool:
-        p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
-        p_left.append(p)
-        labels.append(r'8-12 Hz')
-    
-    # beta
-    T = mi.SumsR2(isContralat=isLeft, isIpsilat=isRight, bins=beta_ticks)
-    if perm_bool:
-        p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
-        #p_left.append(p)
-        #labels.append(r'13-30 Hz')
-    if boot_bool:
-        p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
-        p_left.append(p)
-        labels.append(r'13-30 Hz')
+        p_right.append(p)
+        
+    #labels.append(r'4-7 Hz')
+    r2_right_theta = T.DifferenceOfR2(x, isTreatment)
 
-    
+    # alpha
+    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=alpha_ticks)
+    if perm_bool:
+        p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        p_right.append(p)
+    if boot_bool:
+        p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        p_right.append(p)
+        
+    #labels.append(r'8-12 Hz')
+    r2_right_alpha = T.DifferenceOfR2(x, isTreatment)
+
+    # beta
+    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=beta_ticks)
+    if perm_bool:
+        p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        p_right.append(p)
+    if boot_bool:
+        p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        p_right.append(p)
+
+    #labels.append(r'13-30 Hz')
+    r2_right_beta = T.DifferenceOfR2(x, isTreatment)
+
+
 
     # MERGE LEFTvsRIGHT TESTS
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 2), sharey=True)

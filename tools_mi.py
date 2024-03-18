@@ -13,78 +13,101 @@ class tools_mi():
     def __init__(self):
         pass
 
-
     def create_folder(self, path=None, folder_name=None, verbose=False):
-        # Check if folder doesn't already exist
+        """
+        Creates a folder at a specified path.
+
+        Args:
+            path (str, optional): The directory path where the folder will be created. If None, it defaults to the current working directory.
+            folder_name (str): The name of the folder to be created. If None, no folder will be created.
+            verbose (bool, optional): If True, prints additional messages about the folder creation process. Defaults to False.
+
+        Returns: 
+            None
+        """
+        # Check if the folder does not already exist at the location
         if not os.path.exists(path + folder_name):
-            # Create the folder
+            # Create the folder at the specified location
             os.makedirs(path + folder_name)
+            # If verbose mode is enabled, print a success message
             if verbose: 
                 print(f"Folder '{folder_name}' created successfully at {path}")
-        # If folder already exist print message
         else:
+            # If the folder already exists, print a message 
             print(f"Folder '{folder_name}' already exists at {path}")
 
 
     def import_file_dat(self, path=None, file_name=None, montage_type=None, verbose=True):
-        # Import .dat file
-        b = bcistream(path + file_name)
-        # Extract information 
-        signal, states = b.decode() # electrode time-series, stimuli
-        signal = np.array(signal)   
-        fs = b.samplingrate() # sampling rate
-        ch_names = b.params['ChannelNames'] # channel names as written to file
-        blockSize = b.params.SampleBlockSize
+        """
+        Imports and processes EEG data from a .dat file.
 
+        Args:
+            path (str, optional): The file path leading to the .dat file
+            file_name (str): The name of the .dat file to be imported.
+            montage_type (str): Specifies the electrode montage type ['EGI_128', 'DSI_24', 'GTEC_32']
+            verbose (bool, optional): If True, prints detailed information
+
+        Returns:
+            tuple: A tuple containing the processed signal data, state information, sampling rate, channel names, total file time, and block size
+        """
+
+        # Load the .dat file 
+        b = bcistream(path + file_name)
+        signal, states = b.decode()
+        signal = np.array(signal)
+        
+        # Retrieve additional parameters from the file
+        fs = b.samplingrate()  # Sampling rate
+        ch_names = b.params['ChannelNames']  # Channel names
+        blockSize = b.params.SampleBlockSize  # Block size used in data acquisition
+
+        # Define paradigm constants
         _nBlocks=8
         _trialsPerBlock=4
         _initialSec=2
         _stimSec=3
         _taskSec=10
 
-        if fs % blockSize == 0: print(f'Block size fits perfectly in sample frequency!')
+        # Check if the block size is a perfect divisor of the sampling frequency, this will ensure every block to be saved
+        if fs % blockSize == 0:
+            print(f'Block size fits perfectly in sample frequency!')
         else: 
-            print(f'WARNING: Block size DOES NOT fits perfectly in sample frequency!')
+            # Warn if there's a mismatch, potentially leading to data loss
+            print(f'WARNING: Block size DOES NOT fit perfectly in sample frequency!')
+            # Detailed information on the potential data loss
             print(f'    Losing { ( _initialSec * fs ) % blockSize } samples from initial gap')
             print(f'    Losing { ( _stimSec * fs ) % blockSize } samples from cues')
             print(f'    Losing { ( _taskSec * fs ) % blockSize } samples from tasks')
 
-        _initialSec=_initialSec - ((_initialSec*fs)%blockSize) / fs
-        _stimSec=_stimSec - ((_stimSec*fs)%blockSize) / fs
-        _taskSec=_taskSec - ((_taskSec*fs)%blockSize) / fs
-        '''
-        if montage_type=='DSI_24' or montage_type=='EGI_128':
-            _initialSec=2
-            _stimSec=3
-            _taskSec=10
-        elif montage_type=='GTEC_32':
-            _initialSec=1.92
-            _stimSec=2.944
-            _taskSec=9.984
-        '''
+        # Adjust the timings based on potential data loss
+        _initialSec = _initialSec - ((_initialSec*fs)%blockSize) / fs
+        _stimSec = _stimSec - ((_stimSec*fs)%blockSize) / fs
+        _taskSec = _taskSec - ((_taskSec*fs)%blockSize) / fs
+
+        # Calculate the total duration of the file based on experiment design (theoretical, if all trials are saved)
         totalFileTime = _initialSec + _nBlocks*(_trialsPerBlock*(_stimSec + _taskSec))
 
-        if montage_type=='DSI_24':
-            # Remove annoying channels
-            chKeep_idx = []
-            for i,ch in enumerate(ch_names): 
-                if ch not in ['X1', 'X2', 'X3', 'TRG']: chKeep_idx.append(i)
+        # Reject some channels for 'DSI_24'
+        if montage_type == 'DSI_24':
+            # Example: Removing unwanted channels
+            chKeep_idx = [i for i, ch in enumerate(ch_names) if ch not in ['X1', 'X2', 'X3', 'TRG']]
             signal = signal[chKeep_idx]
             ch_names = np.array(ch_names)[chKeep_idx].tolist()
-            # Remove A2 (which contains mean between original A1 and A2)
-            #signal = np.delete(signal-signal[ch_names.index('A2')], ch_names.index('A2'), axis=0)
 
-        StimulusCode = states['StimulusCode'] # train of stimulus codes
-        StimulusBegin = states['StimulusBegin'] # train of stimulus onsets when a stimulus is played
-        fileTime = signal.shape[1]/fs
+        # Extract stimulus-related information
+        StimulusCode = states['StimulusCode']  # Stimulus codes
+        StimulusBegin = states['StimulusBegin']  # Onsets of stimuli
+        # Extract saved file time 
+        fileTime = signal.shape[1] / fs
 
-
-        # Print summary of .dat file
+        # If verbose, print a detailed summary of the .dat file content
         if verbose: 
+            # Summary includes channel info, sampling rate, and time details
             print(f'\nEEG channels: {signal.shape[0]} Total ticks: {signal.shape[1]}')
             print(f'Each tick corresponds to [s]: {1/fs}')
             print(f'Sampling rate [Hz]: {fs} ~~~ Time on file [s]: {fileTime}')
             print(f'This file contains {round(fileTime / totalFileTime * 100, 2)}% of MI paradigm')
+            # Additional calculations for recorded blocks and trials
             netTime = fileTime - _initialSec
             blockTime = _trialsPerBlock*(_stimSec + _taskSec)
             recordedBlocks = int(round(netTime / blockTime, 3))
@@ -100,64 +123,172 @@ class tools_mi():
 
 
     def import_file_fif(self, path=None, file_name=None):
-        RAW = mne.io.read_raw(path + file_name, preload=True)
+        """
+        Imports EEG data from a .fif file using MNE-Python.
+
+        Args:
+            path (str, optional): The directory path where the .fif file is located.
+                                  If None, current working directory is assumed 
+            file_name (str): The name of the .fif file to be imported.
+
+        Returns:
+            tuple: A tuple containing the raw data object (`RAW`), the electrode montage (`montage`), and the sampling frequency (`fs`) extracted from the file.
+        """
+
+        # Read the .fif file into a RAW object with data preloaded
+        RAW = mne.io.read_raw(path + file_name, preload=True) 
+        # Retrieve the montage used in the recording from the RAW object
         montage = RAW.get_montage()
+        # Extract the sampling frequency from the RAW object's information
         fs = RAW.info['sfreq']
         return RAW, montage, fs
 
 
-    def save_RAW(self, path=None, file_name=None, label=None):
+    def save_RAW(self, RAW=None, path=None, file_name=None, label=None):
+        """
+        Saves an EEG data object to a .fif file with the option to include a label in the filename. 
+        With `overwrite=True` any existing file with the same name will be replaced without warning.
+
+        Args:
+            RAW (mne.io.Raw): The MNE-Python Raw object containing EEG data to be saved.
+            path (str, optional): The directory path where the .fif file will be saved. If None, current working directory is assumed
+            file_name (str): The base name for the .fif file
+            label (str, optional): An optional label to be appended to the file name
+
+        Returns:
+            None: 
+        """
+        # Saves the RAW data to the specified file, overwriting any existing file
         RAW.save(path + file_name + label + '.fif', overwrite=True)
 
 
     def filter_data(self, signal=None, fs=None, l_freq=None, h_freq=None):
-        # Applies FIF bandpass filter to the given time-series
+        """
+        This function uses MNE-Python's filter_data method to apply a Finite Impulse Response (FIR) bandpass filter to the given signal.
+        The function converts the input signal to `float64` to ensure compatibility with the MNE-Python filtering function
+
+        Args:
+            signal (array-like): The time-series signal to be filtered
+            fs (float): The sampling frequency of the signal in Hz
+            l_freq (float): The lower frequency bound of the filter in Hz
+            h_freq (float): The upper frequency bound of the filter in Hz
+
+        Returns:
+            array-like: The filtered signal, which is the same shape as the input signal.
+        """
+        # Convert the signal to float64 for processing and apply the FIR bandpass filter
         return mne.filter.filter_data(signal.astype('float64'), fs, l_freq, h_freq, verbose=False)
 
 
     def spatial_filter(self, sfilt=None, ch_set=None, signal=None, flag_ch=None, verbose=True):
-        # Apply a spatial filter to the signal 
-        # Spatial Laplacian (SLAP)
-        if sfilt=='SLAP':
-            if flag_ch: m = np.array(ch_set.SLAP(exclude=flag_ch))
-            else: m = np.array(ch_set.SLAP())
+        """
+        Applies a spatial filter to an EEG signal to enhance signal quality.
 
-        # Re-reference (REF)
-        elif sfilt=='REF':
+        Args:
+            sfilt (str): Specifies the type of spatial filter to apply. Accepts 'SLAP'
+                         for Spatial Laplacian filtering or 'REF' for re-referencing.
+            ch_set (object): An object representing the set of channels/electrodes, from BCI2000Tools.Electrodes
+            signal (np.array): The EEG signal data 
+            flag_ch (str or list, optional): A str with channel names separated by spaces or a list of channel names, they are used differently based on the spatial filter selected
+            verbose (bool, optional): If True, displays a graphical representation of the spatial filter matrix applied to the channels.
+
+        Returns:
+            tuple: A tuple containing the spatially filtered signal 
+        """
+        # Apply a Spatial Laplacian filter if specified (SLAP)
+        if sfilt == 'SLAP':
+            if flag_ch:
+                m = np.array(ch_set.SLAP(exclude=flag_ch))
+            else:
+                m = np.array(ch_set.SLAP())
+
+        # Apply a Re-reference filter if specified (REF)
+        elif sfilt == 'REF':
             m = np.array(ch_set.RerefMatrix(flag_ch))
 
+        # Create a new channel set object with the spatial filter applied
         new_ch_set = ch_set.copy().spfilt(m)
+
+        # Apply the spatial filter matrix to the signal
         signalNew = m.T @ signal
-        if verbose: imagesc(m, x=ch_set.get_labels(), y=new_ch_set.get_labels(), colorbar=True)
+
+        # If verbose, display the filtering matrix with labels for channels
+        if verbose: 
+            imagesc(m, x=ch_set.get_labels(), y=new_ch_set.get_labels(), colorbar=True)
+
         return signalNew, new_ch_set
 
 
     def find_ch_index(self, ch_set=None, ch_name=None):
-        # Find the index or indices of the channels in ch_name
-        # ch_name examples 'Cz', 'Cz C3 C4'
-        # Returns a list of indices (1 or more), if the searched label is the current ref channels None is returned for its index
+        """
+        Finds and returns the indices of specified channel(s) within a channel set.
+
+        Args:
+            ch_set: The channel set containing channel labels, from BCI2000Tools.Electrodes
+            ch_name: A string or list of strings specifying the channel(s) to find (examples 'Cz', 'Cz C3 C4')
+
+        Returns:
+            List of indices for the specified channel(s), or None if a channel is the current reference.
+        """
+        # Delegate to ch_set's find_labels method to locate channel indices
         return ch_set.find_labels(ch_name)
 
 
     def make_RAW(self, signal=None, fs=None, ch_names=None):
-        # Create info for electrode time-series
+        """
+        Constructs an MNE RAW object from signal data, sampling frequency, and channel names.
+
+        Args:
+            signal: The EEG signal data as a 2D numpy array (channels x time points).
+            fs: Sampling frequency of the signal in Hz
+            ch_names: List of channel names corresponding to the signal rows
+
+        Returns:
+            An MNE Raw object containing the EEG data
+        """
+        # Create MNE info object specifying EEG data characteristics
         info = mne.create_info(ch_names=ch_names, sfreq=fs, ch_types="eeg")
-        # Create RAW object, make sure time-series are in uV
-        RAW = mne.io.RawArray(signal, info, verbose=False)  # uV
+        # Initialize Raw object with the signal and info, make sure time-series are in uV
+        RAW = mne.io.RawArray(signal, info, verbose=False) # uV
         return RAW
 
 
     def make_RAW_stim(self, RAW=None, states=None):
-        # Include stim channels
+        """
+        Adds stimulation channel data to an existing MNE RAW object.
+
+        Args:
+            RAW: The original MNE RAW object containing EEG data.
+            states: Dictionary where keys are stim channel names and values are the data arrays.
+
+        """
+        # Retrieve sampling frequency from the original RAW object
         fs = RAW.info['sfreq']
+        # Create MNE info object for stimulation channels
         info = mne.create_info(ch_names=[x for x in states.keys()], sfreq=fs, ch_types='stim')
-        stim = mne.io.RawArray([x[0] for x in states.values()], info, first_samp=0, copy='auto', verbose=False)
+        # Create RawArray for stimulation data
+        stim = mne.io.RawArray([x[0] for x in states.values()], info, first_samp=0, verbose=False)
+        # Add stim channels to the original RAW object
         RAW.add_channels([stim])
 
 
-
     def make_PREP(self, RAW, isSNR=False, isCorrelation=False, isDeviation=False, isHfNoise=False, isNanFlat=False, isRansac=False):
+        """
+        Identifies noisy channels in an MNE Raw object using various criteria and marks them as bad.
+
+        Args:
+            RAW: The MNE Raw object to be processed.
+            isSNR: If True, identifies bad channels by signal-to-noise ratio.
+            isCorrelation: If True, identifies bad channels by correlation.
+            isDeviation: If True, identifies bad channels by deviation.
+            isHfNoise: If True, identifies bad channels by high-frequency noise.
+            isNanFlat: If True, identifies bad channels by NaN or flat signals.
+            isRansac: If True, identifies bad channels using RANSAC.
+
+        """
+        # Initialize NoisyChannels with the RAW object
         NC = NoisyChannels(RAW, do_detrend=False)
+        # Apply different criteria based on the function parameters to find bad channels
         if isSNR: NC.find_bad_by_SNR()
         if isCorrelation: NC.find_bad_by_correlation(correlation_secs=1.0, correlation_threshold=0.4, frac_bad=0.01)
         if isDeviation: NC.find_bad_by_deviation(deviation_threshold=5.0)
@@ -165,6 +296,7 @@ class tools_mi():
         if isNanFlat: NC.find_bad_by_nan_flat()
         if isRansac: NC.find_bad_by_ransac(n_samples=50, sample_prop=0.25, corr_thresh=0.75, frac_bad=0.4, corr_window_secs=5.0, channel_wise=False, max_chunk_size=None)
 
+        # Collect names of identified bad channels
         ch_names_bad = []
         bad_dict = NC.get_bads(as_dict=True)
         if isSNR: ch_names_bad += bad_dict['bad_by_SNR']
@@ -174,24 +306,52 @@ class tools_mi():
         if isNanFlat: ch_names_bad += bad_dict['bad_by_nan'] + bad_dict['bad_by_flat']
         if isRansac: ch_names_bad += bad_dict['bad_by_ransac']
 
+        # Mark identified bad channels in the RAW object
         RAW.info["bads"].extend(np.unique(ch_names_bad).tolist())
 
 
     def mark_BAD_region(self, RAW=None, block=None):
-        # BAD regions are currently marked by the user
-        # BAD channels should be already marked as such and shouldn't be used in the identification of BAD regions
+        """
+        Opens an interactive plot for visually identifying and marking bad regions in the EEG data.
+
+        Args:
+            RAW: The MNE Raw object containing the EEG data.
+            block: Determines if the plot should block execution until closed. If True, execution is halted until the plot is manually closed
+
+        """
+        # Initialize an empty Annotations object with a 'BAD_region' label
         annot = mne.Annotations([0], [0], ['BAD_region'])
+        # Set the annotations to the RAW object
         RAW.set_annotations(annot)
+        # Inform the user that bad regions should now be marked visually
         print(f'\n --> Mark BAD regions (visually)')
+        # Open an interactive plot of the RAW data for visual inspection and marking
         RAW.plot(block=block)
 
 
     def evaluate_BAD_region(self, RAW=None, label='BAD_region', max_duration=418.):
-        # Summary of BAD regions rejected
-        # By passing a different label a different region type can be analyzed
+        """
+        Evaluates and summarizes bad regions in the EEG data based on annotations.
+
+        Args:
+            RAW: The MNE Raw object containing the EEG data and annotations.
+            label: The label used to identify regions of interest in the annotations. Defaults to 'BAD_region'.
+            max_duration: The maximum duration expected for the data, used to calculate the percentage of data marked as bad. Defaults to 418 seconds but it should be the total file time
+
+        """
+        # Extract annotations from the RAW object
         annot = RAW.annotations
-        bad_regions_id = annot.duration[np.where(annot.description==label)]
+        # Identify durations of annotations matching the specified label
+        bad_regions_id = annot.duration[np.where(annot.description == label)]
+        # Print a summary of bad sections, their total duration, and the percentage of the maximum duration
         print(f" --> {label}: {len(bad_regions_id)} sections, ~{round(sum(bad_regions_id),1)} s [{round(sum(bad_regions_id)/max_duration*100,1)}%] --> Bad channels: {RAW.info['bads']}")
+
+
+
+
+
+
+
 
 
     def make_annotation_MI(self, RAW, fs, nBlocks=None, trialsPerBlock=None, initialSec=None, stimSec=None, taskSec=None, rejectSec=None, nSplit=None, fileTime=None):
@@ -341,20 +501,39 @@ class tools_mi():
         return RAW
 
 
-    def make_montage(self, montage_type=None, ch_to_show=None, conv_dict=None):
-        if montage_type=='DSI_24' or montage_type=='GTEC_32': 
+    def make_montage(self, montage_type=None, ch_to_show=None, conv_dict=None, verbose=False):
+        """
+        Creates and plots a montage for EEG data based on the specified montage type and channels.
+
+        Args:
+            montage_type: The type of montage to create. Supported types  []'DSI_24', 'GTEC_32', 'EGI_128']
+            ch_to_show: List of channels to be displayed in the montage plot.
+            conv_dict: Optional dictionary for converting channel names from the montage names to custom names.
+
+        Returns:
+            montage: The MNE Montage object created based on the specified parameters.
+
+        """
+        # Select the appropriate standard montage based on the specified type
+        if montage_type in ['DSI_24', 'GTEC_32']: 
             montage = mne.channels.make_standard_montage('standard_1020')
-        elif montage_type=='EGI_128': 
+        elif montage_type == 'EGI_128': 
             montage = mne.channels.make_standard_montage('GSN-HydroCel-129')
         
         idx = []
+        # Determine indices for the channels to show, using conversion dictionary if provided
         for ch in ch_to_show:
             if conv_dict: idx.append(montage.ch_names.index(conv_dict[ch]))
             else: idx.append(montage.ch_names.index(ch))
+        
+        # Update montage to only include specified channels
         montage.ch_names = ch_to_show
-        montage.dig = montage.dig[0:3]+[montage.dig[x+3] for x in idx]
-        montage.plot()
+        montage.dig = montage.dig[0:3] + [montage.dig[x + 3] for x in idx]
+        # Plot the montage
+        if verbose: 
+            montage.plot()
         return montage
+
 
 
     def show_electrode(self, ch_location=None, ch_list=None, label=False, color='red', alpha=1):
@@ -409,7 +588,7 @@ class tools_mi():
             ch_list = [x[0] for x in ch_location]
         symmetry = {}
         for x in ch_location:
-            if x[0] in ch_list: 
+            if x[0].lower() in [ch.lower() for ch in ch_list]: 
                 ch1 = x[0]
                 x1 = x[1]
                 y1 = x[2]
@@ -588,6 +767,7 @@ class tools_mi():
         """
         isTreatment = isTreatment.copy() # copy once, then shuffle-in-place many times to save avoid allocation overhead in the simulation loop
         observed = stat(x, isTreatment)
+        print(observed)
         hist = []
         for iSimulation in range( nSimulations ):
             hist.append( stat(x, self.Shuffle( isTreatment )) )
@@ -680,6 +860,8 @@ class tools_mi():
     def pvalue_interval(self, p=None, N=None):
         p_up = p + 1.96*np.sqrt(p*(1-p)/N)
         p_down = p - 1.96*np.sqrt(p*(1-p)/N)
+        if p_down<=0: 
+            p_down = 1e-7
         return p_down, p, p_up
 
 
@@ -693,9 +875,11 @@ class tools_mi():
 
 
 class SumsR2:
-    def __init__(self, isContralat=None, isIpsilat=None, bins=None, transf='r2'):
+    def __init__(self, ch_set=None, dict_symm=None, isContralat=None, bins=None, transf='r2'):
+        self.ch_set = ch_set
+        self.ch_names = np.array(self.ch_set.get_labels())
+        self.dict_symm = dict_symm
         self.isContralat = isContralat
-        self.isIpsilat = isIpsilat
         self.bins = bins
         self.transf = transf
         
@@ -715,7 +899,7 @@ class SumsR2:
             η² = SSB/SST
         """
         # x contains the psds (trial, ch, bin)
-        # isTreatment is labels for task and rest (trial)
+        # isTreatment is labels for rest (True) and task (False)
         # Sample sizes
         n1 = np.sum(isTreatment)
         n2 = np.sum(~isTreatment)
@@ -740,6 +924,7 @@ class SumsR2:
         # This is like calculating eta square for an ANOVA
         # Instead the categorical variable (isTreatment) is transformed into a dummy variable (y) with range of choice
         # The choice of the range doesn't matter but the choice of which group has a bigger label changes the sign of r
+        # Higher value label given to task which has label isTreatment = False
         r = np.zeros((x.shape[1], x.shape[2]))
         y = np.where(isTreatment==True, 1,0)
         # Calculate means
@@ -752,7 +937,7 @@ class SumsR2:
         y_diff_sq = np.sum((y - y_mean) ** 2)
         denominator = np.sqrt(x_diff_sq * y_diff_sq)
         # Compute correlation coefficients
-        r = numerator / denominator        
+        r = numerator / denominator
         if signed: return r*abs(r)
         else: return r*r
 
@@ -761,13 +946,37 @@ class SumsR2:
         elif self.transf == 'r2': return self.calculateR2(x=x, isTreatment=isTreatment)
 
     def DifferenceOfSumsR2(self, x=None, isTreatment=None):
+
+        '''
+            This is for the statistics to be tested 
+            This function doesn't need to track symmetric electrodes since the sum of all electrodes is performed in each hemisphere
+        '''
         x = self.Transform(x, isTreatment)
-        x1 = np.mean(x[:,self.bins[0]:self.bins[1]], axis=1)[ self.isContralat ]
-        x2 = np.mean(x[:,self.bins[0]:self.bins[1]], axis=1)[ self.isIpsilat ]
+        x = np.mean(x[:,self.bins[0]:self.bins[1]], axis=1)
+        x1 = x[ self.isContralat ]
+        isIpsilat = self.FindSymmetric(isContralat=self.isContralat)
+        x2 = x[ isIpsilat ]
         return np.sum(x1) - np.sum(x2)
 
+    def DifferenceOfR2(self, x=None, isTreatment=None):
+        '''
+            This is for plotting the R2 on topoplot
+            This funciton needs to track the symmetric electrode in ipsilateral hemisphere
+        '''
+        x = self.Transform(x, isTreatment)
+        x = np.mean(x[:,self.bins[0]:self.bins[1]], axis=1)
+        x1 = x[ self.isContralat ]
+        isIpsilat = self.FindSymmetric(isContralat=self.isContralat)
+        x2 = x[ isIpsilat ]
+        r2 = np.zeros(len(self.ch_names))
+        for i,j in zip( self.ch_set.find_labels(np.array(self.ch_set.get_labels())[self.isContralat]), range(len(self.isContralat))):
+            r2[i] = x1[j] - x2[j]
+        return x
 
-
-
-
-    
+    def FindSymmetric(self, isContralat=None):
+        ch_symm = []
+        for ch in self.ch_names[isContralat]:
+            # Find symmetric channel of contralateral channel in ipsilateral hemisphere using dict_symm
+            ch_symm.append(self.dict_symm[ch])
+        # Find index of that symmetric channel using ch_set.find_labels()
+        return self.ch_set.find_labels(ch_symm)
