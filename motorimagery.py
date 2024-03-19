@@ -7,7 +7,7 @@ if __name__ == '__main__':
     parser.add_argument( '-m', metavar='montage_type', type=str,   default='EGI_128', help="eeg montage used during data aquisition ['DSI_24', 'EGI_128', 'GTEC_32']")
     parser.add_argument( '-c', metavar='cleaned',      type=bool,  default=False,     help="has the file been previously cleaned? [True, False]")
     parser.add_argument( '-f', metavar='file_path',    type=str,   default='',        help="path to the file to run scipt on")
-    parser.add_argument( '-r', metavar='resolution',   type=int,   default='1',         help="resolution for PSDs [1, 2]")
+    parser.add_argument( '-r', metavar='resolution',   type=int,   default='1',       help="resolution for PSDs [1, 2]")
     opts = parser.parse_args()
 
 import os
@@ -17,6 +17,8 @@ from BCI2000Tools.Electrodes import *
 from BCI2000Tools.Plotting import *
 import mne 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyprep.prep_pipeline import PrepPipeline, NoisyChannels
 
 import eeg_dict # Contains dictionaries and libraries for electrodes locations 
@@ -44,7 +46,7 @@ if __name__ == '__main__':
     base_name, extension = os.path.splitext(file_name)
 
     # Create a folder using base name, if folder doesn't exist 
-    MI.create_folder(path=file_path+'/', folder_name=base_name)
+    path_to_folder = MI.create_folder(path=file_path+'/', folder_name=base_name)
 
 
     # Import .dat file
@@ -103,9 +105,16 @@ if __name__ == '__main__':
 
         # Create RAW
         RAW = MI.make_RAW(signalFilter * 1e-6, fs, ch_set.get_labels())
+        # Create montage based on channels to show
+        montage = MI.make_montage(montage_type=montage_type, 
+                                  ch_to_show=ch_set.get_labels(), 
+                                  conv_dict=eeg_dict.stand1020_to_egi)
+        
+        # Assign montage to RAW
+        RAW.set_montage(montage)
 
         # Run PREP for bad channels
-        MI.make_PREP(RAW, isSNR=True, isDeviation=True, isHfNoise=True, isNanFlat=True)
+        MI.make_PREP(RAW, isSNR=True, isDeviation=True, isHfNoise=True, isNanFlat=True, isRansac=True)
 
         # Mark BAD regions
         MI.mark_BAD_region(RAW, block=True)
@@ -131,21 +140,6 @@ if __name__ == '__main__':
         #MI.evaluate_BAD_region(RAW, 'BAD_region')
         #MI.evaluate_BAD_region(RAW, 'left_1')
 
-        # Create montage based on channels to show
-        #chsetRef.plot()
-        if montage_type=='DSI_24' or montage_type=='GTEC_32':
-            montage = MI.make_montage(montage_type=montage_type, 
-                                      ch_to_show=ch_set.get_labels(), 
-                                      conv_dict=None)
-
-        elif montage_type=='EGI_128':
-            montage = MI.make_montage(montage_type=montage_type, 
-                                      ch_to_show=ch_set.get_labels(), 
-                                      conv_dict=eeg_dict.stand1020_to_egi)
-
-        # Assign montage to RAW
-        RAW.set_montage(montage)
-        #ch_set.plot()
 
         # Here we can save RAW as .fif
         MI.save_RAW(RAW=RAW, path=file_path+'/', file_name=base_name, label='')
@@ -154,7 +148,15 @@ if __name__ == '__main__':
         # Here we can import a previously saved .fif file
         RAW, montage, fs = MI.import_file_fif(path=file_path+'/', file_name=base_name + '.fif')
         ch_set = ChannelSet(RAW.info['ch_names'][:RAW.get_data(picks='eeg').shape[0]])
+        # This is manually added here cause when you import a RAW .fif file it doesn't know the location of all EGI channels, it's inconvenient
+        if montage_type=='EGI_128':
+            ch_set = ChannelSet('EGI128_location.txt')
+            # make sure this rereference is the same as the one before saving the RAW .fif, it should be
+            m = np.array(ch_set.RerefMatrix('TP9 TP10'))
+            # Occurs in place
+            ch_set = ch_set.spfilt(m)
 
+    # RAW is saved without interpolation performed on it, in this way RAW.info['bads'] still contains the identified bad channels
     # Interpolate BAD channels
     old_ch_bads = RAW.info['bads']
     if not RAW.info['bads'] == []:
@@ -162,28 +164,26 @@ if __name__ == '__main__':
 
 
     # Spatial filter with exclusion
-    signalSLAP, ch_setSLAP = MI.spatial_filter(sfilt= 'SLAP', 
-                                               ch_set= ch_set, 
-                                               signal= RAW.get_data(picks='eeg'), 
-                                               flag_ch= eeg_dict.ch_face + eeg_dict.ch_forehead, 
-                                               verbose= True)
-
+    signalSLAP, ch_setSLAP = MI.spatial_filter(sfilt = 'SLAP', 
+                                               ch_set = ch_set, 
+                                               signal = RAW.get_data(picks='eeg'), 
+                                               flag_ch = eeg_dict.ch_face + eeg_dict.ch_forehead, 
+                                               verbose = True)
 
     # Create RAW after spatial filter
     RAW_SL = MI.make_RAW(signal=signalSLAP, fs=RAW.info['sfreq'], ch_names=ch_setSLAP.get_labels())
-    MI.make_RAW_stim(RAW_SL, states)
-    RAW_SL.set_annotations(RAW.annotations)
-    if montage_type=='DSI_24' or montage_type=='GTEC_32':
-        montage = MI.make_montage(montage_type=montage_type, 
-                                  ch_to_show=ch_setSLAP.get_labels(), 
-                                  conv_dict=None)
-
-    elif montage_type=='EGI_128':
-        montage = MI.make_montage(montage_type=montage_type, 
+    # Create montage based on channels to show
+    montage = MI.make_montage(montage_type=montage_type, 
                                   ch_to_show=ch_setSLAP.get_labels(), 
                                   conv_dict=eeg_dict.stand1020_to_egi)
     # Assign montage to RAW_SL
     RAW_SL.set_montage(montage)
+
+    # Add Stim to RAW_SL
+    MI.make_RAW_stim(RAW_SL, states)
+
+    # Import annotations
+    RAW_SL.set_annotations(RAW.annotations)
     #RAW_SL.plot()
 
 
@@ -197,8 +197,7 @@ if __name__ == '__main__':
                 try:
                     epochs_ = MI.make_epochs(RAW, 
                                              tmin=tmin, 
-                                             tmax=tmax, 
-                                             twindow=twindow, 
+                                             tmax=tmax,  
                                              event_id=event_dict[label+f'{i}'], 
                                              events_from_annot=events_from_annot, verbose=False)
 
@@ -241,8 +240,9 @@ if __name__ == '__main__':
     MI.show_electrode(ch_location, right_labels, True, 'blue')
     plt.yticks([])
     plt.subplots_adjust(wspace=0)  # Remove space between plots
+    plt.savefig(f'{path_to_folder}/target_electrodes.png')
+    plt.savefig(f'{path_to_folder}/target_electrodes.pdf')
     plt.show()
-
 
 
     bins_ticks = np.arange(fmin, fmax+1, int(resolution))
@@ -341,9 +341,8 @@ if __name__ == '__main__':
     r2_right_beta = T.DifferenceOfR2(x, isTreatment)
 
 
-
     # MERGE LEFTvsRIGHT TESTS
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 2), sharey=True)
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 2.5), sharey=True)
     y_max = 0.5
     y_min = -0.5
     y = np.linspace(start=y_max, stop=y_min, num=len(p_left)+2)
@@ -370,8 +369,8 @@ if __name__ == '__main__':
     ax1.set_xlim(ax1.get_xlim()[::-1])  # Reverse the x-axis for left plot
     ax1.set_xlim(right=0, left=8)
     ax1.set_ylim(y_min, y_max)
-    ax1.axvline(MI.negP(0.05), color='cornflowerblue', lw=1, ls='--', alpha=0.5, label='95% C.L.')
-    ax1.axvline(MI.negP(0.01), color='black', lw=1, ls='--', alpha=0.5, label='99% C.L.')
+    ax1.axvline(MI.negP(0.05), color='black', lw=1, ls='--', alpha=0.5, label='95% C.L.')
+    ax1.axvline(MI.negP(0.01), color='cornflowerblue', lw=1, ls='--', alpha=0.5, label='99% C.L.')
     ax1.set_yticks(y)
     ax1.set_yticklabels(labels)
     ax1.legend(loc='upper left')
@@ -395,9 +394,84 @@ if __name__ == '__main__':
     ax2.set_xlabel(r'-log($p$)')
     ax2.set_xlim(left=0, right=8)
     ax1.set_ylim(y_min, y_max)
-    ax2.axvline(MI.negP(0.05), color='cornflowerblue', lw=1, ls='--', alpha=0.5)
-    ax2.axvline(MI.negP(0.01), color='black', lw=1, ls='--', alpha=0.5)
+    ax2.axvline(MI.negP(0.05), color='black', lw=1, ls='--', alpha=0.5)
+    ax2.axvline(MI.negP(0.01), color='cornflowerblue', lw=1, ls='--', alpha=0.5)
     #--------- 
     plt.subplots_adjust(wspace=0)  # Adjust space between subplots
+    plt.savefig(f'{path_to_folder}/pVal_atRes_{resolution}_Hz.png')
+    plt.savefig(f'{path_to_folder}/pVal_atRes_{resolution}_Hz.pdf')
     plt.show()
     
+
+    # Create alternative cmap
+    def make_cmap(cmap, name, n=256):
+        cmap = LinearSegmentedColormap(name, cmap, n)
+        if name not in plt.colormaps():
+            try:
+                matplotlib.cm.register_cmap(name=name, cmap=cmap)
+            except Exception as e:
+                print(f"Failed to register colormap '{name}'. Error: {str(e)}")
+        return cmap
+    # Define the colormap dictionary
+    kelvin_i = {
+        'red': (
+            (0.000, 0.0, 0.0),
+            (0.350, 0.0, 0.0),
+            (0.500, 1.0, 1.0),
+            (0.890, 1.0, 1.0),
+            (1.000, 0.5, 0.5),
+        ),
+        'green': (
+            (0.000, 0.0, 0.0),
+            (0.125, 0.0, 0.0),
+            (0.375, 1.0, 1.0),
+            (0.640, 1.0, 1.0),
+            (0.910, 0.0, 0.0),
+            (1.000, 0.0, 0.0),
+        ),
+        'blue': (
+            (0.000, 0.5, 0.5),
+            (0.110, 1.0, 1.0),
+            (0.500, 1.0, 1.0),
+            (0.650, 0.0, 0.0),
+            (1.000, 0.0, 0.0),
+        ),
+    }
+    # Create and register the custom colormap
+    kelvin_i_cmap = make_cmap(kelvin_i, 'kelvin_i', 256)
+
+
+    # PLOT TOPOPLOTS WITH R2
+    # Identify interpolated channels to show on the topomap
+    mask = np.array([True if x in old_ch_bads else False for x in ch_setSLAP.get_labels()])
+    mask_params1 = dict(marker='X', markersize=7, markerfacecolor='black')
+    # Identify target channels to show on the topomap
+    mask_right = np.array([True if x in isLeft_ch else False for x in ch_setSLAP.get_labels()])
+    mask_left = np.array([True if x in isRight_ch else False for x in ch_setSLAP.get_labels()])
+    mask_params2 = dict(marker='o', markersize=4, markerfacecolor='lime', alpha=0.75)
+
+    fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(6, 6))
+    # Plot topoplots - Theta
+    colors = [(0.0, 'blue'),     # Color at -1
+              (0.5, 'white'),    # Color at 0
+              (1.0, 'red')]      # Color at 1
+    custom_cmap_theta = LinearSegmentedColormap.from_list('custom_cmap', colors)
+    MI.plot_topomap_L_R([axes[0,0],axes[0,1],axes[0,2]], RAW_SL, r2_left_theta, r2_right_theta, custom_cmap_theta, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '4-7 Hz', True)
+
+    # Plot topoplots - Alpha
+    #colors = [(0.0, 'turquoise'),     # Color at -1
+    #          (0.5, 'white'),    # Color at 0
+    #          (1.0, 'magenta')]      # Color at 1#
+    custom_cmap_alpha = LinearSegmentedColormap.from_list('custom_cmap', colors)
+    MI.plot_topomap_L_R([axes[1,0],axes[1,1],axes[1,2]], RAW_SL, r2_left_alpha, r2_right_alpha, custom_cmap_alpha, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '8-12 Hz', False)
+
+    # Plot topoplots - Beta
+    #colors = [(0.0, 'royalblue'),     # Color at -1
+    #          (0.5, 'white'),    # Color at 0
+    #          (1.0, 'orangered')]      # Color at 1
+    custom_cmap_beta = LinearSegmentedColormap.from_list('custom_cmap', colors)
+    MI.plot_topomap_L_R([axes[2,0],axes[2,1],axes[2,2]], RAW_SL, r2_left_beta, r2_right_beta, custom_cmap_beta, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '13-30 Hz', False)
+    fig.tight_layout()
+    plt.savefig(f'{path_to_folder}/topoR2_atRes_{resolution}_Hz.png')
+    plt.savefig(f'{path_to_folder}/topoR2_atRes_{resolution}_Hz.pdf')
+    plt.show()
