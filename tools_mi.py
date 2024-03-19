@@ -5,9 +5,11 @@ from BCI2000Tools.Electrodes import *
 from BCI2000Tools.Plotting import *
 import mne 
 import matplotlib.pyplot as plt
+from matplotlib.colors import LinearSegmentedColormap
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyprep.prep_pipeline import PrepPipeline, NoisyChannels
 
-import eeg_dict
+import eeg_dict # Contains dictionaries and libraries for electrodes locations 
 
 class tools_mi():
     def __init__(self):
@@ -23,7 +25,7 @@ class tools_mi():
             verbose (bool, optional): If True, prints additional messages about the folder creation process. Defaults to False.
 
         Returns: 
-            None
+            str: path to folder to be used later when saving files
         """
         # Check if the folder does not already exist at the location
         if not os.path.exists(path + folder_name):
@@ -35,6 +37,8 @@ class tools_mi():
         else:
             # If the folder already exists, print a message 
             print(f"Folder '{folder_name}' already exists at {path}")
+
+        return path + folder_name
 
 
     def import_file_dat(self, path=None, file_name=None, montage_type=None, verbose=True):
@@ -70,7 +74,7 @@ class tools_mi():
 
         # Check if the block size is a perfect divisor of the sampling frequency, this will ensure every block to be saved
         if fs % blockSize == 0:
-            print(f'Block size fits perfectly in sample frequency!')
+            print(f'Block size [{blockSize}] fits perfectly in sample frequency [{fs/blockSize}]!')
         else: 
             # Warn if there's a mismatch, potentially leading to data loss
             print(f'WARNING: Block size DOES NOT fit perfectly in sample frequency!')
@@ -347,13 +351,6 @@ class tools_mi():
         print(f" --> {label}: {len(bad_regions_id)} sections, ~{round(sum(bad_regions_id),1)} s [{round(sum(bad_regions_id)/max_duration*100,1)}%] --> Bad channels: {RAW.info['bads']}")
 
 
-
-
-
-
-
-
-
     def make_annotation_MI(self, RAW, fs, nBlocks=None, trialsPerBlock=None, initialSec=None, stimSec=None, taskSec=None, rejectSec=None, nSplit=None, fileTime=None):
         '''
         # This is a brute force method (takes time, and it's the ideal one for a new paradigm
@@ -523,7 +520,7 @@ class tools_mi():
         idx = []
         # Determine indices for the channels to show, using conversion dictionary if provided
         for ch in ch_to_show:
-            if conv_dict: idx.append(montage.ch_names.index(conv_dict[ch]))
+            if montage_type == 'EGI_128': idx.append(montage.ch_names.index(conv_dict[ch]))
             else: idx.append(montage.ch_names.index(ch))
         
         # Update montage to only include specified channels
@@ -662,11 +659,10 @@ class tools_mi():
             if x[0].lower() in [ch.lower() for ch in ch_list]:
                 ch1, x1, y1 = x  # Current electrode and its coordinates
                 for y in ch_location:
-                    if y[0] in ch_list: 
-                        ch2, x2, y2 = y  # Potential symmetric electrode and its coordinates
-                        # Check for symmetry about the Y-axis
-                        if x1 == -x2 and y1 == y2:
-                            symmetry[ch1] = ch2  # Record symmetric pair
+                    ch2, x2, y2 = y  # Potential symmetric electrode and its coordinates
+                    # Check for symmetry about the Y-axis
+                    if x1 == -x2 and y1 == y2:
+                        symmetry[ch1] = ch2  # Record symmetric pair
         return symmetry
 
 
@@ -972,6 +968,31 @@ class tools_mi():
         return -np.log(p)
 
 
+    def plot_topomap_L_R(self, ax=None, RAW=None, dataL=None, dataR=None, cmap=None, vlim=None, masks=None, mask_params=None, text_range=None, text=None):
+        # 
+        im,cm = mne.viz.plot_topomap(dataL, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim, mask=masks[0], mask_params=mask_params[0], show=False, axes=ax[0]) 
+        im,cm = mne.viz.plot_topomap(dataL, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim, mask=masks[1], mask_params=mask_params[1], show=False, axes=ax[0]) 
+        ax[0].set_title(f"{text_range} (Left)")
+        im,cm = mne.viz.plot_topomap(dataR, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim, mask=masks[0], mask_params=mask_params[0], show=False, axes=ax[1])
+        im,cm = mne.viz.plot_topomap(dataR, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim, mask=masks[2], mask_params=mask_params[1], show=False, axes=ax[1])
+        ax[1].set_title(f"{text_range} (Right)")
+        # Color bar
+        clim = dict(kind='value', lims=[-1,0,1])
+        divider = make_axes_locatable(ax[2])
+        ax[2].set_yticks([])
+        ax[2].set_xticks([])
+        ax[2].axis('off')
+        ax[2] = divider.append_axes(position='left', size='20%', pad=0.5)
+        mne.viz.plot_brain_colorbar(ax[2], clim=clim, colormap=cmap, transparent=False, orientation='vertical', label=None)
+        if text: 
+            #ax[2].plot(0, 0.5, marker='o', markersize=8, markerfacecolor='lime')
+            #ax[2].plot(0, 0.35, marker='X', markersize=7, markerfacecolor='black')  # Plot a single blue point at (1,1)
+            ax[2].text(3, 0.26, 'Target', color='lime')
+            ax[2].text(3, 0.25,'Target', color='black')
+            #ax[2].text(3, 0.11, 'Interpolated', color='black')
+            ax[2].text(3, 0.1, 'Interpolated', color='black')
+
+
 
 
 
@@ -1030,7 +1051,7 @@ class SumsR2:
         if not signed:
             return eta_squared
         else:
-            signs = np.where(mu1 - mu2 > 0, 1, -1)  # Determine the direction of the effect
+            signs = np.where(mu1 - mu2 > 0, -1, 1)  # Determine the direction of the effect
             return eta_squared * signs  # Return signed Eta squared values
 
     def calculateR2(self, x=None, isTreatment=None, signed=True):
@@ -1039,7 +1060,7 @@ class SumsR2:
         variable and a binary categorical variable, which is used as a measure of effect size.
 
         Args:
-            x (numpy array): A 3D array with dimensions corresponding to trials, channels, and frequency bins. It represents the continuous data.
+            x (numpy array): It represents the continuous data with shape (trial, ch)
             isTreatment (numpy array): A binary array where True indicates samples belonging to one group (e.g., treatment) and False to the other (e.g., control).
             signed (bool): If True, the result is signed squared R to indicate the direction of the association.
                            If False, the result is the unsigned R^2, which only indicates the strength of the association.
@@ -1049,17 +1070,17 @@ class SumsR2:
                          and frequency bin. This is optionally signed to reflect the direction of the association.
         """
         # Initialize the correlation matrix
-        r = np.zeros((x.shape[1], x.shape[2]))
+        r = np.zeros(x.shape[1])
         
-        # Transform the categorical variable into a dummy variable
+        # Transform the categorical variable into a dummy variable, with task (False) getting higher label
         y = np.where(isTreatment==False, 1, 0)
         
-        # Calculate the means of x and y
+        # Calculate the means of x (aggregate trials) and y
         x_mean = np.mean(x, axis=0)
         y_mean = np.mean(y)
         
         # Calculate the numerator of the correlation coefficient
-        numerator = np.sum((x - x_mean) * (y - y_mean)[:, np.newaxis, np.newaxis], axis=0)
+        numerator = np.sum((x - x_mean) * (y - y_mean)[:, np.newaxis], axis=0)
         
         # Calculate the denominator of the correlation coefficient
         x_diff_sq = np.sum((x - x_mean) ** 2, axis=0)
@@ -1080,7 +1101,7 @@ class SumsR2:
         Applies a specified transformation to the data based on the set transformation type.
 
         Args:
-            x: The data array to be transformed.
+            x: The data array to be transformed with shape (trial, ch)
             isTreatment: A boolean array indicating treatment group membership for each element in `x`.
 
         Returns:
@@ -1100,17 +1121,17 @@ class SumsR2:
         Calculates the difference between the sums of transformed data for contralateral and ipsilateral electrodes.
 
         Args:
-            x: Data array to be transformed and analyzed.
+            x: Data array with shape (trial, ch, bin)
             isTreatment: Boolean array indicating treatment group membership for each element in `x`.
 
         Returns:
             The difference between the sum of the transformed data for contralateral electrodes and
             the sum for ipsilateral electrodes, based on the specified frequency bins.
         """
-        # Apply specified transformation (e.g., 'eta2' or 'r2') to the data
+        # Average the data (PSDs) within the specified frequency bins (trial, ch, bin)
+        x = np.mean(x[:, :, self.bins[0]:self.bins[-1]], axis=2)
+        # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch)
         x = self.Transform(x, isTreatment)
-        # Average the transformed data within the specified frequency bins
-        x = np.mean(x[:, self.bins[0]:self.bins[1]], axis=1)
         # Sum the averages for contralateral electrodes
         x1 = x[self.isContralat]
         # Identify and sum the averages for ipsilateral electrodes
@@ -1125,7 +1146,7 @@ class SumsR2:
         Calculates the difference in R² values between contralateral and ipsilateral electrodes for topoplot visualization.
 
         Args:
-            x: The data array 
+            x: Data array with shape (trial, ch, bin)
             isTreatment: Boolean array indicating treatment group membership for each element in `x`.
 
         Returns:
@@ -1138,12 +1159,13 @@ class SumsR2:
             - The output array `r2` is initialized to zeros and filled with the computed R² differences for electrodes identified as
               contralateral, with the ipsilateral differences being directly subtracted.
         """
-        # Apply specified transformation and average over selected frequency bins
+        # Average the data (PSDs) within the specified frequency bins (trial, ch, bin)
+        x = np.mean(x[:, :, self.bins[0]:self.bins[-1]], axis=2)
+        # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch)
         x = self.Transform(x, isTreatment)
-        x = np.mean(x[:,self.bins[0]:self.bins[1]], axis=1)
-        # Extract transformed data for contralateral electrodes
+        # Sum the averages for contralateral electrodes
         x1 = x[self.isContralat]
-        # Find and extract transformed data for ipsilateral electrodes
+        # Identify and sum the averages for ipsilateral electrodes
         isIpsilat = self.FindSymmetric(isContralat=self.isContralat)
         x2 = x[isIpsilat]
         # Initialize R² difference array
