@@ -535,13 +535,27 @@ class tools_mi():
         return montage
 
 
-
     def show_electrode(self, ch_location=None, ch_list=None, label=False, color='red', alpha=1):
-        # Plot locations in a X,Y plane of electrodes of interest, can show labels
+        """
+        Displays electrode positions on a 2D plot.
+
+        Args:
+            ch_location (list of tuples): List of tuples containing channel names and their X, Y coordinates.
+            ch_list (list): List of channel names to highlight.
+            label (bool): If True, display labels for the highlighted channels.
+            color (str): Color for the highlighted channels. Default is 'red'.
+            alpha (float): Opacity level for the highlighted channels.
+
+        Returns:
+            None
+        """
+        # Plot all electrodes in grey with partial opacity
         plt.scatter([x[1] for x in ch_location], [x[2] for x in ch_location], color='grey', alpha=0.5)
+        # Exit if no channels to highlight
         if not ch_list: 
             return None
         else: 
+            # Highlight and optionally label specified channels
             for ch in ch_list: 
                 y = [[x[1],x[2]] for x in ch_location if x[0]==ch][0]
                 plt.scatter(y[0], y[1], color=color, alpha=alpha)
@@ -549,106 +563,209 @@ class tools_mi():
 
 
     def find_ch_central(self, ch_location=None, ch_list=None):
-        # If no target list is specified use any electrode
+        """
+        Identifies central electrodes from a list of electrode locations.
+
+        Args:
+            ch_location (list of tuples): List of tuples with electrode names and their X, Y coordinates.
+            ch_list (list): Optional list of electrode names to filter through.
+
+        Returns:
+            list: A list of names of central electrodes (those with an X coordinate = 0) 
+        """
+        # Default to using all electrodes if no specific list is provided
         if not ch_list: 
             ch_list = [x[0] for x in ch_location]
+        # Return names of electrodes that are central and in the target list
         return [x[0] for x in ch_location if (x[1]==0 and x[0] in ch_list)]
 
 
     def find_ch_left(self, ch_location=None, ch_list=None):
-        # If no target list is specified use any electrode
+        """
+        Identifies left-sided electrodes from a list of electrode locations.
+
+        Args:
+            ch_location (list of tuples): List of tuples with electrode names and their X, Y coordinates.
+            ch_list (list): Optional list of electrode names to filter through.
+
+        Returns:
+            list: A list of names of left-sided electrodes (those with an X coordinate less than 0) 
+        """
+        # Use all electrodes if no specific list is provided
         if not ch_list: 
             ch_list = [x[0] for x in ch_location]
+        # Return names of electrodes that are on the left side and in the target list
         return [x[0] for x in ch_location if (x[1]<0 and x[0] in ch_list)]
 
 
     def find_ch_right(self, ch_location=None, ch_list=None):
-        # If no target list is specified use any electrode
+        """
+        Identifies right-sided electrodes from a list of electrode locations.
+
+        Args:
+            ch_location (list of tuples): List detailing each electrode's name and its X, Y coordinates.
+            ch_list (list): Optional. A list of specific electrode names to consider. If not provided, all electrodes are considered.
+
+        Returns:
+            list: Names of electrodes located on the right side (X coordinate greater than 0),
+        """
+        # Use all electrodes if no specific list is provided
         if not ch_list: 
             ch_list = [x[0] for x in ch_location]
+        # Return the names of right-sided electrodes from the targeted list
         return [x[0] for x in ch_location if (x[1]>0 and x[0] in ch_list)]
 
 
     def find_ch_circle(self, ch_location=None, ch_list=None, radius=None):
-        # Find which electrodes in a list of interest are contained in a circle with given radius
-        # If no target list is specified use any electrode
+        """
+        Identifies electrodes within a specified circle radius.
+
+        Args:
+            ch_location (list of tuples): Electrode details with each tuple containing the electrode's name and X, Y coordinates.
+            ch_list (list): Optional. Specific electrodes to consider. If not provided, all electrodes are considered.
+            radius (float): The radius of the circle within which to find electrodes.
+
+        Returns:
+            list: Names of electrodes located within the specified circle radius,
+        """
+        # Default to using all electrodes if no specific list is provided
         if not ch_list: 
             ch_list = [x[0] for x in ch_location]
-        circle = []
+        circle = []  # Initialize list to hold electrodes within the circle
+        # Iterate through each electrode to check if it falls within the specified radius
         for x in ch_location:
             if x[0] in ch_list:
-                    if np.sqrt(x[1]**2 + x[2]**2) <= radius: circle.append(x[0])
+                # Check if the electrode is within the circle using the Pythagorean theorem
+                if np.sqrt(x[1]**2 + x[2]**2) <= radius: 
+                    circle.append(x[0])  # Add electrode name to the list if within the circle
         return circle
 
 
     def find_ch_symmetry(self, ch_location=None, ch_list=None):
-        # Create a dictionary of symmetries given a list of channel of interest
-        # If no target list is specified use any electrode
+        """
+        Identifies pairs of electrodes that are symmetric about the Y-axis.
+
+        Args:
+            ch_location (list of tuples): Each tuple contains an electrode's name and its X, Y coordinates.
+            ch_list (list): Optional. A list of specific electrodes to consider for symmetry pairing. 
+                            If not provided, all electrodes are considered.
+
+        Returns:
+            dict: A dictionary where each key-value pair represents a pair of electrode names 
+        """
+        # Default to using all electrodes if no specific list is provided
         if not ch_list: 
             ch_list = [x[0] for x in ch_location]
-        symmetry = {}
+        symmetry = {}  # Initialize dictionary to hold symmetric electrode pairs
+        # Check each electrode against all others for symmetry
         for x in ch_location:
-            if x[0].lower() in [ch.lower() for ch in ch_list]: 
-                ch1 = x[0]
-                x1 = x[1]
-                y1 = x[2]
+            if x[0].lower() in [ch.lower() for ch in ch_list]:
+                ch1, x1, y1 = x  # Current electrode and its coordinates
                 for y in ch_location:
                     if y[0] in ch_list: 
-                        ch2 = y[0]
-                        x2 = y[1]
-                        y2 = y[2]
-                        if x1==-x2 and y1==y2: symmetry[ch1] = ch2 
+                        ch2, x2, y2 = y  # Potential symmetric electrode and its coordinates
+                        # Check for symmetry about the Y-axis
+                        if x1 == -x2 and y1 == y2:
+                            symmetry[ch1] = ch2  # Record symmetric pair
         return symmetry
 
 
     def interpolate(self, RAW=None, reset_bads=True):
-        # Identify bad channels (previously saved)
-        # Requires RAW.set_montage(montage) before interpolating
+        """
+        Interpolates bad channels in an M/EEG recording. RAW must have a set montage.
+
+        Args:
+            RAW: The Raw object containing the data and channel information.
+            reset_bads (bool): If True, clears the list of bad channels after interpolation. 
+                               If False, the list of bad channels remains unchanged.
+
+        Returns:
+            list: The list of channels that were marked as bad before interpolation.
+        """
+        # Display the bad channels to be interpolated
         print(f"BAD CHANNELS to be interpolated: {RAW.info['bads']}")
-        # Interpolation via spline (don't reset information regarding bad channels)
-        old_ch_bad = RAW.info['bads']
+        old_ch_bad = RAW.info['bads']  # Store the current list of bad channels
+
+        # Perform interpolation, with the option to reset the list of bad channels
         RAW.interpolate_bads(reset_bads=reset_bads)
+
+        # Provide feedback based on the reset_bads argument
         if reset_bads: 
             print(f"RAW.info['bads'] have been modified")
-        elif not reset_bads: 
+        else:
             print(f"RAW.info['bads'] have not been modified")
 
-        return old_ch_bad
+        return old_ch_bad  # Return the original list of bad channels
 
 
-    def make_epochs(self, RAW=None, tmin=None, tmax=None, twindow=None, event_id=None, events_from_annot=None, verbose=False):
-        expected_epochs_per_type = sum([1 for x in events_from_annot if x[2]==event_id])  # Calculate total expected number of epochs per type (e.g. LEFT)
-        if verbose: print(f"Expected {expected_epochs_per_type} epochs {tmax-tmin}s-long (per type)")
-        # Generate Epochs
-        # Generate and store epochs for each condition
+    def make_epochs(self, RAW=None, tmin=None, tmax=None, event_id=None, events_from_annot=None, verbose=False):
+        """
+        Segments the Raw M/EEG data into epochs based on specified event identifiers.
+
+        Args:
+            RAW: The Raw object containing the data to be epoched.
+            tmin (float): Start time before event onset (in seconds).
+            tmax (float): End time after event onset (in seconds).
+            event_id (int): The ID of the event around which epochs are created.
+            events_from_annot (numpy array): Events array extracted from annotations in the Raw data.
+            verbose (bool): If True, prints detailed information about the epoching process.
+
+        Returns:
+            mne.Epochs: The epochs created from the Raw data for the specified event ID.
+        """
+        expected_epochs_per_type = sum([1 for x in events_from_annot if x[2]==event_id])  # Calculate expected epochs for the event type
+        if verbose: 
+            print(f"Expected {expected_epochs_per_type} epochs {tmax-tmin}s-long (per type)")
+        
+        # Create epochs from RAW data based on the specified event ID and time window
         epochs_ = mne.Epochs(RAW, events_from_annot, event_id=event_id, tmin=tmin, tmax=tmax, baseline=None, preload=True, verbose=False)
         # Note: Index 0 in shape is the number of epochs, index 1 is channel numbers, index 2 is EEG values at segment time t
-        # Print the number of Epochs generated
-        n_epochs = epochs_.get_data(picks='eeg').shape[0]  # Number of epochs for the current condition
-        if verbose: print(f"Summary: {n_epochs}/{expected_epochs_per_type} total epochs")
+        # Calculate the actual number of epochs created
+        n_epochs = epochs_.get_data(picks='eeg').shape[0]
+        if verbose: 
+            print(f"Summary: {n_epochs}/{expected_epochs_per_type} total epochs")
+
         return epochs_
 
 
     def make_psd(self, epochs=None, fs=None, resolution=None, tmin=None, tmax=None, fmin=None, fmax=None, nPerSegment=None, nOverlap=None, aggregate=True, verbose=False):
-        # Define bin resolution in frequency space and run PSD
-        # Resolution defines bin width [Hz]
-        nfft = int(fs / resolution)
-        effective_window = (1 / resolution)
-        expected_segments = int(((tmax - tmin) - effective_window) / (effective_window - nOverlap / fs)) + 1
-        expected_bins = int((fmax - fmin) / resolution + 1)
-        window = 'hann'
-        
-        # Welch method
+        """
+        Computes the Power Spectral Density (PSD) of given epochs using the Welch method.
+
+        Args:
+            epochs: The epochs from which to compute the PSD.
+            fs (float): The sampling frequency of the data.
+            resolution (float): The frequency resolution of the PSD (in Hz).
+            tmin (float): Start time (in seconds) to consider for the PSD computation.
+            tmax (float): End time (in seconds) to consider for the PSD computation.
+            fmin (float): Minimum frequency (in Hz) to include in the PSD.
+            fmax (float): Maximum frequency (in Hz) to include in the PSD.
+            nPerSegment (int): Number of data points per segment used in the Welch method.
+            nOverlap (int): Number of points of overlap between segments.
+            aggregate (bool): If True, aggregates the PSD across all epochs and segments (segments first).
+            verbose (bool): If True, prints additional information about the PSD computation process.
+
+        Returns:
+            ndarray: The computed PSD values.
+        """
+        nfft = int(fs / resolution)  # Number of FFT points
+        effective_window = (1 / resolution)  # Effective window length in seconds
+        expected_segments = int(((tmax - tmin) - effective_window) / (effective_window - nOverlap / fs)) + 1  # Expected number of segments
+        expected_bins = int((fmax - fmin) / resolution + 1)  # Expected number of frequency bins
+
+        # Compute PSD using Welch's method
         psd_ = epochs.compute_psd(method='welch', 
-                                 fmin=fmin, fmax=fmax, 
-                                 tmin=tmin, tmax=tmax, 
-                                 n_fft=nfft, 
-                                 n_overlap=nOverlap, 
-                                 n_per_seg=nPerSegment, 
-                                 average=None, 
-                                 window=window, 
-                                 output='power', 
-                                 verbose=verbose).get_data()
+                                  fmin=fmin, fmax=fmax, 
+                                  tmin=tmin, tmax=tmax,
+                                  n_fft=nfft, 
+                                  n_overlap=nOverlap,
+                                  n_per_seg=nPerSegment, 
+                                  average=None,
+                                  window='hann', 
+                                  output='power', 
+                                  verbose=verbose).get_data()
+
+        # Verbose output for PSD computation details
         if verbose: 
             print(f"Expected w/ resolution {resolution} [Hz/bin]: ")
             print(f"  - Eff_Window Length [s]: {effective_window}")
@@ -658,126 +775,67 @@ class tools_mi():
             print(f"  - Expected segments (or periodograms): {expected_segments}")
             print(f"Dimension check: (epoch, ch, bins, segments/periodograms) = {psd_.shape}")
         
+        # Aggregate PSD values if requested
         if aggregate: 
-            # if average='mean' is defined in compute_psd(), a dimension is lost and no need to aggregate periodograms
-            if len(psd_.shape)>3:
-                # Aggregate periodograms via mean (Welch)
-                psd_ = np.mean(psd_, axis=3)
+            if len(psd_.shape) > 3:
+                psd_ = np.mean(psd_, axis=3)  # Average across segments/periodograms
                 if verbose: print(f"Aggregate segments/periodograms: (epoch, ch, bins) = {psd_.shape}")
-            # Aggregate PSDs from different epochs epochs via mean
-            psd_ = np.mean(psd_, axis=0)
+            psd_ = np.mean(psd_, axis=0)  # Average across epochs
             if verbose: print(f"Aggregate epoch-wise: (ch, bins) = {psd_.shape}")
             
         return psd_
 
 
-
-    def CalculateEtas(self, x=None, isTreatment=None, signed=True):
-        """
-            Calculates the correlation ratio between two arrays X and Y by comparing the variance between groups to the
-            variance within group
-
-            The ratio between the variance between groups and the total variance is commonly referred to as the "Eta squared (η²)" in statistics. 
-            It is a measure of effect size for use in ANOVA (Analysis of Variance) and represents the proportion of the total variance in the dependent variable that is attributable to the variance between groups.
-            Here's a breakdown of its components:
-                Between-group variance (SSB): Variance due to the difference between the means of the groups.
-                Total variance (SST): The sum of the between-group variance (SSB) and within-group variance (SSW).
-            Eta squared is a useful measure for understanding the proportion of the overall variance that is explained by the grouping variable, 
-            indicating the effect size of the group differences on the dependent variable.
-            
-            η² = SSB/SST
-        """
-        # x contains the psds (trial, ch, bin)
-        # isTreatment is labels for task and rest (trial)
-        
-        # Sample sizes
-        n1 = np.sum(isTreatment)
-        n2 = np.sum(~isTreatment)
-        
-        # Samples
-        x1 = x[isTreatment]
-        x2 = x[~isTreatment]
-        # Samples means over the trials
-        mu1 = np.mean(x1, axis=0)
-        mu2 = np.mean(x2, axis=0)
-        grand_mean = np.mean(x, axis=0)
-        
-        # Sum of squares within groups
-        ssw = np.sum((x1 - mu1)**2, axis=0) + np.sum((x2 - mu2)**2, axis=0)
-        # Sum of squares between groups
-        ssb = n1*(mu1 - grand_mean)**2 + n2*(mu2 - grand_mean)**2
-        
-        # eta-square
-        if not signed: return ssb/(ssb + ssw)
-        else: 
-            signs = np.where(mu1 - mu2 > 0, 1, -1)
-            return ssb/(ssb + ssw) * signs
-
-
-    def r2(self, x=None, isTreatment=None, signed=True):
-        # This is like calculating eta square for an ANOVA
-        # Instead the categorical variable (isTreatment) is transformed into a dummy variable (y) with range of choice
-        # The choice of the range doesn't matter but the choice of which group has a bigger label changes the sign of r
-        r = np.zeros((x.shape[1], x.shape[2]))
-        y = np.where(isTreatment==True, 1,0)
-        #for ch in range(x.shape[1]):
-        #    for b in range(x.shape[2]):
-        #        r[ch, b] = np.corrcoef( x[:,ch,b], y )[0,1]
-                
-        # Calculate means
-        x_mean = np.mean(x, axis=0)
-        y_mean = np.mean(y)
-        # Calculate the numerator
-        numerator = np.sum((x - x_mean) * (y - y_mean)[:, np.newaxis, np.newaxis], axis=0)
-        # Calculate the denominator
-        x_diff_sq = np.sum((x - x_mean) ** 2, axis=0)
-        y_diff_sq = np.sum((y - y_mean) ** 2)
-        denominator = np.sqrt(x_diff_sq * y_diff_sq)
-        # Compute correlation coefficients
-        r = numerator / denominator        
-        if signed: return r*abs(r)
-        else: return r*r
-
-
     def Shuffle(self, a=None):
         """
-        Shuffle sequence `a` in-place and also return a reference to it.
-        This is the helper function at the core of the `ApproxPermutationTest()`.
-        """
-        np.random.shuffle( a )
-        return a
+        Randomly shuffles the elements of the array `a` in place and returns a reference to the shuffled array.
+        
+        Args:
+            a (numpy array): The array to be shuffled. The shuffling is performed in place, affecting the original array.
 
+        Returns:
+            numpy array: A reference to the shuffled array (note that the original array `a` is modified in place).
+        """
+        np.random.shuffle(a)
+        return a
 
 
     def ApproxPermutationTest(self, x=None, isTreatment=None, stat=None, nSimulations=1999, plot=False):
         """
-        One-sided two-sample approximate permutation test assuming the
-        value of `stat(x,isTreatment)` is expected to be larger under H1
-        than under H0.
+        One-sided two-sample approximate permutation test assuming the value of `stat(x,isTreatment)` is expected to be larger under H1 than under H0.
 
-        We call this an "approximate" permutation test because an actual
-        exact permutation test would test *every* permutation exhaustively,
-        whereas this one approximates the same distribution by repeated
-        random label reshuffling.
+        We call this an "approximate" permutation test because an actual exact permutation test would test *every* permutation exhaustively,
+        whereas this one approximates the same distribution by repeated random label reshuffling.
 
-        Note that permutation tests potentially suffer from the Behren's-
-        Fisher problem: a difference-of-means permutation test will perform
-        similarly to a naive (uncorrected) t-test in that regard. To fix
-        this, use `BootstrapTest()` instead.
+        Note that permutation tests potentially suffer from the Behren's-Fisher problem: a difference-of-means permutation test will perform 
+        similarly to a naive (uncorrected) t-test in that regard. To fix this, use `BootstrapTest()` instead.
+
+        Args:
+            x: Data array.
+            isTreatment: Boolean array indicating treatment group membership.
+            stat: Test statistic function 
+            nSimulations (int): Number of random permutations for approximating the distribution.
+            plot (bool): If True, plots the histogram of the permuted statistics with the observed statistic marked.
+
+        Returns:
+            float: P-value estimating the probability of observing the given or more extreme statistic under the null hypothesis.
+
+        This method approximates the distribution of the test statistic under the null hypothesis by randomly shuffling group labels.
+        It is termed "approximate" due to relying on a subset of all possible permutations. The function calculates the observed test statistic,
+        performs `nSimulations` permutations of the treatment labels, calculates the test statistic for each permutation, and optionally plots
+        the distribution of permuted statistics with the observed value. The p-value is calculated as the proportion of permuted statistics
+        that are equal to or more extreme than the observed statistic, adjusted for continuity.
         """
-        isTreatment = isTreatment.copy() # copy once, then shuffle-in-place many times to save avoid allocation overhead in the simulation loop
-        observed = stat(x, isTreatment)
-        print(observed)
-        hist = []
-        for iSimulation in range( nSimulations ):
-            hist.append( stat(x, self.Shuffle( isTreatment )) )
-        if plot: 
-            fig = plt.hist(hist)
+        isTreatment = isTreatment.copy()  # Copy to avoid modifying original
+        observed = stat(x, isTreatment)  # Calculate observed statistic
+        # Perform permutations and calculate p-value
+        hist = [stat(x, self.Shuffle(isTreatment)) for _ in range(nSimulations)]
+        if plot:  # Optionally plot the distribution of permuted statistics
+            plt.hist(hist)
             plt.axvline(observed, color='black')
             plt.show()
-            
-        nReached = sum( np.array(hist) >= observed  )
-        return ( 0.5 + nReached ) / ( 1.0 + nSimulations )
+        nReached = sum(np.array(hist) >= observed)
+        return (0.5 + nReached) / (1.0 + nSimulations)
 
 
     def BootstrapTest(self, x=None, isTreatment=None, stat=None, nSimulations=1999, nullHypothesisStatValue=0.0, plot=False):
@@ -785,88 +843,134 @@ class tools_mi():
         Efron & Tibshirani page 215, equation (15.32)
 
         Again this is equivalent to a one-sided two-sample test and again,
-        we assume the value of `stat(x,isTreatment)` is expected to be
-        *larger* under H1 than under H0. However, the math ends up being
-        rearranged somewhat to perform the test, so we'll need to
-        specify explicitly the `stat() value that we expect under the
-        null hypothesis (and we will be counting the simulation results
-        that go *below* it---however, don't be deceived by this: the
-        situation is still the same as in the other tests, in the sense
-        that a bigger effect still means a higher `stat()` value).
+        we assume the value of `stat(x,isTreatment)` is expected to be *larger* under H1 than under H0. However, the math ends up being
+        rearranged somewhat to perform the test, so we'll need to specify explicitly the `stat() value that we expect under the
+        null hypothesis (and we will be counting the simulation results that go *below* it---however, don't be deceived by this: the
+        situation is still the same as in the other tests, in the sense that a bigger effect still means a higher `stat()` value).
 
-        Bootstrap tests avoid the Behren's-Fisher problem that you get with
-        permutation tests: a difference-of-means bootstrap test will perform
-        similarly to a t-test with Welch's correction.
+        Bootstrap tests avoid the Behren's-Fisher problem that you get with permutation tests: a difference-of-means bootstrap test will perform similarly to a t-test with Welch's correction.
+
+        Args:
+            x: Data array.
+            isTreatment: Boolean array indicating treatment group membership.
+            stat: Test statistic function 
+            nSimulations (int): Number of bootstrap samples to generate.
+            nullHypothesisStatValue (float): Expected value of the test statistic under the null hypothesis.
+            plot (bool): If True, plots the histogram of the bootstrap statistics with observed and null hypothesis values marked.
+
+        Returns:
+            float: P-value estimating the probability of observing a test statistic as extreme as or more extreme than the null hypothesis value.
         """
-        hist = []
-        for iSimulation in range( nSimulations ):
-            hist.append( stat( self.BootstrapResample(x, isTreatment),isTreatment) )
-        if plot: 
+        hist = [stat(self.BootstrapResample(x, isTreatment), isTreatment) for _ in range(nSimulations)]
+        if plot:  # Optionally plot the distribution of bootstrap statistics
             plt.hist(hist)
-            plt.axvline(nullHypothesisStatValue, color='red')
-            plt.axvline(stat( x,isTreatment ), color='black')
+            plt.axvline(nullHypothesisStatValue, color='red')  # Null hypothesis value
+            plt.axvline(stat(x, isTreatment), color='black')  # Observed statistic value
             plt.show()
-            
-        nReached = sum( np.array(hist) < nullHypothesisStatValue )
-        return ( 0.5 + nReached ) / ( 1.0 + nSimulations )
+        # Calculate p-value
+        nReached = sum(np.array(hist) < nullHypothesisStatValue)
+        return (0.5 + nReached) / (1.0 + nSimulations)
 
 
     def BootstrapResample(self, a=None, isTreatment=None):
         """
-        Sample with replacement from `a` (or from each class of `a`, separately).
-        This is the helper function at the core of the `BootstrapTest()`.
+        Performs bootstrap resampling on the array `a`.
+
+        Args:
+            a: The array to be resampled. Can be multidimensional.
+            isTreatment: An optional boolean array indicating treatment group membership. If provided, resampling is performed separately within each group.
+
+        Returns:
+            A resampled array with the same shape as `a`. If `isTreatment` is provided, each group
+            defined by `isTreatment` is resampled independently, preserving group sizes.
         """
         if isTreatment is not None:
             isTreatment = isTreatment.ravel()
             # This part only works if a.shape[1] doesn't exist
             #a = a.copy()
             #ar = a.ravel()
-            
             # This part works for any shape of a
             ar = a.copy()
 
-            ar[  isTreatment ] = self.BootstrapResample( ar[  isTreatment ] ) # note that in bootstrap resampling, the
-            ar[ ~isTreatment ] = self.BootstrapResample( ar[ ~isTreatment ] ) # labels don't actually get scrambled
+            # Resample each group separately
+            ar[isTreatment] = self.BootstrapResample(ar[isTreatment])     # note that in bootstrap resampling, the
+            ar[~isTreatment] = self.BootstrapResample(ar[~isTreatment])   # labels don't actually get scrambled
             #return a 
             return ar
 
-        ind = np.random.randint( a.shape[0], size=a.shape[0] )
+        # General case: resample the entire array
+        ind = np.random.randint(a.shape[0], size=a.shape[0])
         #return a.flat[ ind ]
-        return a[ ind ]
+        return a[ind]
 
 
     def convert_dB(self, X=None):
         """
-        Converts given X values to decibels (dB), input X is assumed to be in uV² (microVolts square)
+        Converts power values from microvolts squared (uV²) to decibels (dB).
         Steps: 
             Converts X from uV² to V²
             Converts to dB using 1V as reference
+
+        Args:
+            X: Array of power values in uV².
+
+        Returns:
+            Array of power values converted to dB, using 1V² as the reference power level.
         """
-        return 10*np.log10(X*1e12)
+        return 10 * np.log10(X * 1e12)
 
 
     def plot_frequency_bands(self, ax=None, ylim=None):
         """
+        Adds frequency band annotations to a plot.
+
+        Args:
+            ax: Matplotlib axis object to which the frequency band lines and labels are added.
+            ylim: Tuple of (ymin, ymax) specifying the vertical limits of the plot. Used to position text labels.
         """
-        # Frequency band annotations
+        # Frequency band annotations with their upper limit and label position
         bands = {r'$\delta$': [4, 2], r'$\theta$': [8, 5.5], r'$\alpha$': [12, 10], r'$\beta$': [30, 21], r'$\gamma$': [50, 35]}
-        for band, [freq,text_pos] in bands.items():
+        for band, [freq, text_pos] in bands.items():
+            # Draw vertical line for each band
             ax.axvline(x=freq, color='grey', linestyle='--', linewidth=1, alpha=0.5)
-            if ylim: 
-                delta = abs(ylim[1] - ylim[0])*0.13
+            # Place text label if ylim is provided
+            if ylim:
+                delta = abs(ylim[1] - ylim[0]) * 0.13  # Calculate vertical position for text
                 ax.text(text_pos, ylim[1] - delta, band, horizontalalignment='center')
 
 
     def pvalue_interval(self, p=None, N=None):
-        p_up = p + 1.96*np.sqrt(p*(1-p)/N)
-        p_down = p - 1.96*np.sqrt(p*(1-p)/N)
-        if p_down<=0: 
-            p_down = 1e-7
+        """
+        Calculates the confidence interval for a proportion.
+
+        Args:
+            p: Observed proportion (success rate).
+            N: Sample size.
+
+        Returns:
+            tuple: Lower bound, observed proportion, and upper bound of the 95% confidence interval for the proportion.
+        """
+        # Calculate upper and lower bounds of the 95% confidence interval
+        p_up = p + 1.96 * np.sqrt(p * (1 - p) / N)
+        p_down = p - 1.96 * np.sqrt(p * (1 - p) / N)
+        
+        # Adjust lower bound if necessary to avoid negative probability
+        if p_down <= 0: p_down = 1e-7
         return p_down, p, p_up
 
 
     def negP(self, p):
+        """
+        Calculates the negative natural logarithm of a probability.
+
+        Args:
+            p: A probability value (0 < p ≤ 1).
+
+        Returns:
+            The negative natural logarithm of the probability `p`.
+        """
         return -np.log(p)
+
 
 
 
@@ -883,100 +987,188 @@ class SumsR2:
         self.bins = bins
         self.transf = transf
         
-    def calculateEtas(self, x=None, isTreatment=None, signed=True):
+    def CalculateEtas2(self, x=None, isTreatment=None, signed=True):
         """
-            Calculates the correlation ratio between two arrays X and Y by comparing the variance between groups to the
-            variance within group
+        Calculates Eta squared (η²), a measure of effect size, for comparing variances between and within groups.
+        The ratio between the variance between groups and the total variance is commonly referred to as the "Eta squared (η²)" in statistics. 
+        It is a measure of effect size for use in ANOVA (Analysis of Variance) and represents the proportion of the total variance in the dependent variable that is attributable to the variance between groups.
+        Here's a breakdown of its components:
+            Between-group variance (SSB): Variance due to the difference between the means of the groups.
+            Total variance (SST): The sum of the between-group variance (SSB) and within-group variance (SSW).
+        Eta squared is a useful measure for understanding the proportion of the overall variance that is explained by the grouping variable, 
+        indicating the effect size of the group differences on the dependent variable.
+        η² = SSB/SST
 
-            The ratio between the variance between groups and the total variance is commonly referred to as the "Eta squared (η²)" in statistics. 
-            It is a measure of effect size for use in ANOVA (Analysis of Variance) and represents the proportion of the total variance in the dependent variable that is attributable to the variance between groups.
-            Here's a breakdown of its components:
-                Between-group variance (SSB): Variance due to the difference between the means of the groups.
-                Total variance (SST): The sum of the between-group variance (SSB) and within-group variance (SSW).
-            Eta squared is a useful measure for understanding the proportion of the overall variance that is explained by the grouping variable, 
-            indicating the effect size of the group differences on the dependent variable.
+        Args:
+            x (numpy array): A 3D array with dimensions corresponding to trials, channels, and frequency bins.
+            isTreatment (numpy array): A boolean array where True indicates samples belonging to the treatment group and False to the control group
+            signed (bool): If True, the calculated η² values are signed based on the direction of the effect (positive if the mean of the treatment group is higher than the control group, and negative otherwise).
 
-            η² = SSB/SST
+        Returns:
+            numpy array: The signed Eta squared values for each channel and frequency bin
         """
-        # x contains the psds (trial, ch, bin)
-        # isTreatment is labels for rest (True) and task (False)
-        # Sample sizes
+        # Calculate sample sizes for treatment and control groups
         n1 = np.sum(isTreatment)
         n2 = np.sum(~isTreatment)
-        # Samples
+
+        # Separate the data into treatment and control groups
         x1 = x[isTreatment]
         x2 = x[~isTreatment]
-        # Samples means over the trials
+
+        # Compute mean values for each group and the grand mean (aggregate trials)
         mu1 = np.mean(x1, axis=0)
         mu2 = np.mean(x2, axis=0)
         grand_mean = np.mean(x, axis=0)
+
         # Sum of squares within groups
         ssw = np.sum((x1 - mu1)**2, axis=0) + np.sum((x2 - mu2)**2, axis=0)
         # Sum of squares between groups
         ssb = n1*(mu1 - grand_mean)**2 + n2*(mu2 - grand_mean)**2
-        # eta-square
-        if not signed: return ssb/(ssb + ssw)
-        else: 
-            signs = np.where(mu1 - mu2 > 0, 1, -1)
-            return ssb/(ssb + ssw) * signs 
-    
+
+        # Compute Eta squared, with an option to sign the result
+        eta_squared = ssb / (ssb + ssw)
+        if not signed:
+            return eta_squared
+        else:
+            signs = np.where(mu1 - mu2 > 0, 1, -1)  # Determine the direction of the effect
+            return eta_squared * signs  # Return signed Eta squared values
+
     def calculateR2(self, x=None, isTreatment=None, signed=True):
-        # This is like calculating eta square for an ANOVA
-        # Instead the categorical variable (isTreatment) is transformed into a dummy variable (y) with range of choice
-        # The choice of the range doesn't matter but the choice of which group has a bigger label changes the sign of r
-        # Higher value label given to task which has label isTreatment = False
+        """
+        Calculates the squared Pearson correlation coefficient (R^2) between a continuous
+        variable and a binary categorical variable, which is used as a measure of effect size.
+
+        Args:
+            x (numpy array): A 3D array with dimensions corresponding to trials, channels, and frequency bins. It represents the continuous data.
+            isTreatment (numpy array): A binary array where True indicates samples belonging to one group (e.g., treatment) and False to the other (e.g., control).
+            signed (bool): If True, the result is signed squared R to indicate the direction of the association.
+                           If False, the result is the unsigned R^2, which only indicates the strength of the association.
+
+        Returns:
+            numpy array: The squared Pearson correlation coefficient (R^2) for each channel
+                         and frequency bin. This is optionally signed to reflect the direction of the association.
+        """
+        # Initialize the correlation matrix
         r = np.zeros((x.shape[1], x.shape[2]))
-        y = np.where(isTreatment==True, 1,0)
-        # Calculate means
+        
+        # Transform the categorical variable into a dummy variable
+        y = np.where(isTreatment==False, 1, 0)
+        
+        # Calculate the means of x and y
         x_mean = np.mean(x, axis=0)
         y_mean = np.mean(y)
-        # Calculate the numerator
+        
+        # Calculate the numerator of the correlation coefficient
         numerator = np.sum((x - x_mean) * (y - y_mean)[:, np.newaxis, np.newaxis], axis=0)
-        # Calculate the denominator
+        
+        # Calculate the denominator of the correlation coefficient
         x_diff_sq = np.sum((x - x_mean) ** 2, axis=0)
         y_diff_sq = np.sum((y - y_mean) ** 2)
         denominator = np.sqrt(x_diff_sq * y_diff_sq)
-        # Compute correlation coefficients
+        
+        # Compute the correlation coefficient
         r = numerator / denominator
-        if signed: return r*abs(r)
-        else: return r*r
+        
+        # Return signed or unsigned R^2 based on the signed argument
+        if signed:
+            return r * abs(r)  # Signed R^2
+        else:
+            return r * r  # Unsigned R^2
 
     def Transform(self, x=None, isTreatment=None):
-        if self.transf == 'eta2': return self.calculateEtas(x=x, isTreatment=isTreatment)
-        elif self.transf == 'r2': return self.calculateR2(x=x, isTreatment=isTreatment)
+        """
+        Applies a specified transformation to the data based on the set transformation type.
+
+        Args:
+            x: The data array to be transformed.
+            isTreatment: A boolean array indicating treatment group membership for each element in `x`.
+
+        Returns:
+            The result of the transformation applied to the data.
+            This function supports two types of transformations:
+                - 'eta2': Computes the eta squared (η²) statistic, a measure of effect size for the difference between groups.
+                - 'r2': Computes the squared Pearson correlation coefficient (R²) to quantify the strength of association.
+        """
+        if self.transf == 'eta2':
+            return self.calculateEtas2(x=x, isTreatment=isTreatment)
+        elif self.transf == 'r2':
+            return self.calculateR2(x=x, isTreatment=isTreatment)
+
 
     def DifferenceOfSumsR2(self, x=None, isTreatment=None):
+        """
+        Calculates the difference between the sums of transformed data for contralateral and ipsilateral electrodes.
 
-        '''
-            This is for the statistics to be tested 
-            This function doesn't need to track symmetric electrodes since the sum of all electrodes is performed in each hemisphere
-        '''
+        Args:
+            x: Data array to be transformed and analyzed.
+            isTreatment: Boolean array indicating treatment group membership for each element in `x`.
+
+        Returns:
+            The difference between the sum of the transformed data for contralateral electrodes and
+            the sum for ipsilateral electrodes, based on the specified frequency bins.
+        """
+        # Apply specified transformation (e.g., 'eta2' or 'r2') to the data
         x = self.Transform(x, isTreatment)
-        x = np.mean(x[:,self.bins[0]:self.bins[1]], axis=1)
-        x1 = x[ self.isContralat ]
+        # Average the transformed data within the specified frequency bins
+        x = np.mean(x[:, self.bins[0]:self.bins[1]], axis=1)
+        # Sum the averages for contralateral electrodes
+        x1 = x[self.isContralat]
+        # Identify and sum the averages for ipsilateral electrodes
         isIpsilat = self.FindSymmetric(isContralat=self.isContralat)
-        x2 = x[ isIpsilat ]
+        x2 = x[isIpsilat]
+        # Compute and return the difference between the sums for contralateral and ipsilateral electrodes
         return np.sum(x1) - np.sum(x2)
 
+
     def DifferenceOfR2(self, x=None, isTreatment=None):
-        '''
-            This is for plotting the R2 on topoplot
-            This funciton needs to track the symmetric electrode in ipsilateral hemisphere
-        '''
+        """
+        Calculates the difference in R² values between contralateral and ipsilateral electrodes for topoplot visualization.
+
+        Args:
+            x: The data array 
+            isTreatment: Boolean array indicating treatment group membership for each element in `x`.
+
+        Returns:
+            A numpy array of R² differences suitable for plotting on a topoplot, emphasizing hemispheric differences in brain activity.
+
+        Note:
+            - The function assumes that electrode symmetry and hemisphere information are properly defined in `self.isContralat` and
+              that methods exist for transforming data (`Transform`), finding symmetric electrodes (`FindSymmetric`), and identifying
+              electrode indices (`ch_set.find_labels` and `ch_set.get_labels`).
+            - The output array `r2` is initialized to zeros and filled with the computed R² differences for electrodes identified as
+              contralateral, with the ipsilateral differences being directly subtracted.
+        """
+        # Apply specified transformation and average over selected frequency bins
         x = self.Transform(x, isTreatment)
         x = np.mean(x[:,self.bins[0]:self.bins[1]], axis=1)
-        x1 = x[ self.isContralat ]
+        # Extract transformed data for contralateral electrodes
+        x1 = x[self.isContralat]
+        # Find and extract transformed data for ipsilateral electrodes
         isIpsilat = self.FindSymmetric(isContralat=self.isContralat)
-        x2 = x[ isIpsilat ]
+        x2 = x[isIpsilat]
+        # Initialize R² difference array
         r2 = np.zeros(len(self.ch_names))
-        for i,j in zip( self.ch_set.find_labels(np.array(self.ch_set.get_labels())[self.isContralat]), range(len(self.isContralat))):
+        # Compute R² differences for matched contralateral and ipsilateral electrodes
+        for i, j in zip(self.ch_set.find_labels(np.array(self.ch_set.get_labels())[self.isContralat]), range(len(self.isContralat))):
             r2[i] = x1[j] - x2[j]
+        # Return the transformed data
         return x
 
+
     def FindSymmetric(self, isContralat=None):
+        """
+        Identifies symmetric electrode indices in the opposite hemisphere
+
+        Args:
+            isContralat: A boolean array indicating electrode positions. True for target electrodes, False otherwise.
+
+        Returns:
+            A list of indices corresponding to the symmetric electrodes in the opposite hemisphere.
+        """
         ch_symm = []
+        # Iterate over target electrodes to find their symmetric counterparts
         for ch in self.ch_names[isContralat]:
-            # Find symmetric channel of contralateral channel in ipsilateral hemisphere using dict_symm
+            # Append the symmetric channel name based on predefined mapping
             ch_symm.append(self.dict_symm[ch])
-        # Find index of that symmetric channel using ch_set.find_labels()
+        # Convert symmetric channel names to indices for data analysis
         return self.ch_set.find_labels(ch_symm)
