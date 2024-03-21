@@ -4,7 +4,6 @@
 if __name__ == '__main__':
     import argparse 
     parser = argparse.ArgumentParser( description=__doc__, formatter_class=argparse.RawTextHelpFormatter )
-    parser.add_argument( '-m', metavar='montage_type', type=str,   default='EGI_128', help="eeg montage used during data aquisition ['DSI_24', 'EGI_128', 'GTEC_32']")
     parser.add_argument( '-c', metavar='cleaned',      type=bool,  default=False,     help="has the file been previously cleaned? [True, False]")
     parser.add_argument( '-f', metavar='file_path',    type=str,   default='',        help="path to the file to run scipt on")
     parser.add_argument( '-r', metavar='resolution',   type=int,   default='1',       help="resolution for PSDs [1, 2]")
@@ -28,14 +27,9 @@ import tools_mi as mi # Contains tools for eeg and motor imagery
 if __name__ == '__main__':
     MI = mi.tools_mi()
 
-    montage_type = opts.m
     clean_bool = opts.c
     file_path, file_name = os.path.split(opts.f)
     resolution = opts.r
-
-    if montage_type == 'DSI_24': ch_info = 'DSI24_location.txt'
-    elif montage_type == 'EGI_128': ch_info = 'EGI128_location.txt'
-    # elif montage_type == 'GTEC_32': ch_info = 'GTEC32_location.txt'
 
     ch_location = eeg_dict.ch_location
 
@@ -50,41 +44,19 @@ if __name__ == '__main__':
 
 
     # Import .dat file
-    signal, states, fs, ch_names, fileTime, blockSize = MI.import_file_dat(file_path+'/', file_name, montage_type)
+    signal, states, fs, ch_names, blockSize, montage_type = MI.import_file_dat(file_path+'/', file_name)
 
-    nBlocks = 8
-    trialsPerBlock = 4
+    if montage_type == 'DSI_24': ch_info = 'DSI24_location.txt'
+    elif montage_type == 'EGI_128': ch_info = 'EGI128_location.txt'
+    elif montage_type == 'GTEC_32': ch_info = 'GTEC32_location.txt'
+
+    fileTime, nBlocks, trialsPerBlock, initialSec, stimSec, taskSec = MI.evaluate_mi_paradigm(signal=signal, states=states, fs=fs, blockSize=blockSize, verbose=True)
     nSplit = 6
-    
-    initialSec = 2
-    stimSec = 3
-    taskSec = 10
     rejectSec = taskSec - 9 # 1 [s]
-
-    initialSec = initialSec - ( (initialSec * fs) % blockSize ) / fs # 1.92 [s]
-    stimSec = stimSec - ( (stimSec * fs) % blockSize ) / fs # 2.944 [s]
-    taskSec = taskSec - ( (taskSec * fs) % blockSize ) / fs # 9.984 [s]
-    rejectSec = taskSec - 9 # 0.984 [s]
-
-    '''
-    if montage_type == 'DSI_24' or montage_type == 'EGI_128': 
-        nBlocks = 8
-        initialSec = 2
-        stimSec = 3
-        taskSec = 10
-        rejectSec = 1
-    elif montage_type == 'GTEC_32':
-        nBlocks = 8
-        initialSec = 1.92
-        stimSec = 2.944
-        taskSec = 9.984
-        rejectSec = 0.984
-    '''
 
     tmin = 0
     twindow = (taskSec - rejectSec) # e.g. 9
     tmax = twindow/nSplit # e.g. 1.5
-
 
     # File has not been cleaned before, it's a new file
     if not clean_bool:
