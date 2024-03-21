@@ -41,18 +41,17 @@ class tools_mi():
         return path + folder_name
 
 
-    def import_file_dat(self, path=None, file_name=None, montage_type=None, verbose=True):
+    def import_file_dat(self, path=None, file_name=None, verbose=True):
         """
         Imports and processes EEG data from a .dat file.
 
         Args:
             path (str, optional): The file path leading to the .dat file
             file_name (str): The name of the .dat file to be imported.
-            montage_type (str): Specifies the electrode montage type ['EGI_128', 'DSI_24', 'GTEC_32']
             verbose (bool, optional): If True, prints detailed information
 
         Returns:
-            tuple: A tuple containing the processed signal data, state information, sampling rate, channel names, total file time, and block size
+            tuple: A tuple containing the processed signal data, state information, sampling rate, channel names, and block size
         """
 
         # Load the .dat file 
@@ -65,6 +64,37 @@ class tools_mi():
         ch_names = b.params['ChannelNames']  # Channel names
         blockSize = b.params.SampleBlockSize  # Block size used in data acquisition
 
+        # Extract stimulus-related information
+        StimulusCode = states['StimulusCode']  # Stimulus codes
+        StimulusBegin = states['StimulusBegin']  # Onsets of stimuli
+        # Extract saved file time 
+        fileTime = signal.shape[1] / fs
+
+        if   signal.shape[0] == 24:  montage_type = 'DSI_24'
+        elif signal.shape[0] == 32:  montage_type = 'GTEC_32'
+        elif signal.shape[0] == 128: montage_type = 'EGI_128'
+        else: print(f'WARNING: I don not know this montage with {signal.shape[0]} channels!')
+
+        # Reject some channels for 'DSI_24'
+        if montage_type == 'DSI_24':
+            # Example: Removing unwanted channels
+            chKeep_idx = [i for i, ch in enumerate(ch_names) if ch not in ['X1', 'X2', 'X3', 'TRG']]
+            signal = signal[chKeep_idx]
+            ch_names = np.array(ch_names)[chKeep_idx].tolist()
+
+        if verbose: 
+            # Summary includes channel info, sampling rate, and time details
+            print(f'\nEEG channels: {signal.shape[0]} Total ticks: {signal.shape[1]}')
+            print(f'Each tick corresponds to [s]: {1/fs}')
+            print(f'Sampling rate [Hz]: {fs} ~~~ Time on file [s]: {fileTime}')
+            print(f'Montage Detected: {montage_type}')
+            print(f'Signal range: [{np.min(signal)}, {np.mean(signal)}, {np.max(signal)}]\n')
+            print(f'StimulusCode: {np.unique(StimulusCode, return_counts=True)}')
+
+        return signal, states, fs, ch_names, blockSize, montage_type
+
+
+    def evaluate_mi_paradigm(self, signal=None, states=None, fs=None, blockSize=None, verbose=True):
         # Define paradigm constants
         _nBlocks=8
         _trialsPerBlock=4
@@ -91,25 +121,11 @@ class tools_mi():
         # Calculate the total duration of the file based on experiment design (theoretical, if all trials are saved)
         totalFileTime = _initialSec + _nBlocks*(_trialsPerBlock*(_stimSec + _taskSec))
 
-        # Reject some channels for 'DSI_24'
-        if montage_type == 'DSI_24':
-            # Example: Removing unwanted channels
-            chKeep_idx = [i for i, ch in enumerate(ch_names) if ch not in ['X1', 'X2', 'X3', 'TRG']]
-            signal = signal[chKeep_idx]
-            ch_names = np.array(ch_names)[chKeep_idx].tolist()
-
-        # Extract stimulus-related information
-        StimulusCode = states['StimulusCode']  # Stimulus codes
-        StimulusBegin = states['StimulusBegin']  # Onsets of stimuli
         # Extract saved file time 
         fileTime = signal.shape[1] / fs
 
         # If verbose, print a detailed summary of the .dat file content
         if verbose: 
-            # Summary includes channel info, sampling rate, and time details
-            print(f'\nEEG channels: {signal.shape[0]} Total ticks: {signal.shape[1]}')
-            print(f'Each tick corresponds to [s]: {1/fs}')
-            print(f'Sampling rate [Hz]: {fs} ~~~ Time on file [s]: {fileTime}')
             print(f'This file contains {round(fileTime / totalFileTime * 100, 2)}% of MI paradigm')
             # Additional calculations for recorded blocks and trials
             netTime = fileTime - _initialSec
@@ -118,12 +134,8 @@ class tools_mi():
             print(f'    Number of full blocks: { recordedBlocks }')
             leftOver = netTime - recordedBlocks * blockTime
             print(f'    Additional trials: { abs(leftOver) // (_stimSec + _taskSec) }')
-            #print(f'Ch-list: {ch_names}')
-            print(f'StimulusCode: {np.unique(StimulusCode, return_counts=True)}')
-            print(f'StimulusBegin: {np.unique(StimulusBegin, return_counts=True)}')
-            print(f'Signal range: [{np.min(signal)}, {np.mean(signal)}, {np.max(signal)}]\n')
 
-        return signal, states, fs, ch_names, fileTime, blockSize
+        return fileTime, _nBlocks, _trialsPerBlock, _initialSec, _stimSec, _taskSec
 
 
     def import_file_fif(self, path=None, file_name=None):
@@ -553,9 +565,12 @@ class tools_mi():
             return None
         else: 
             # Highlight and optionally label specified channels
-            for ch in ch_list: 
+            for i,ch in enumerate(ch_list): 
                 y = [[x[1],x[2]] for x in ch_location if x[0]==ch][0]
-                plt.scatter(y[0], y[1], color=color, alpha=alpha)
+                if type(color)==list and len(color)>1: 
+                    plt.scatter(y[0], y[1], color=color[i], alpha=alpha)
+                else: 
+                    plt.scatter(y[0], y[1], color=color, alpha=alpha)
                 if label: plt.text(y[0], y[1], ch)
 
 
@@ -925,7 +940,7 @@ class tools_mi():
             ylim: Tuple of (ymin, ymax) specifying the vertical limits of the plot. Used to position text labels.
         """
         # Frequency band annotations with their upper limit and label position
-        bands = {r'$\delta$': [4, 2], r'$\theta$': [8, 5.5], r'$\alpha$': [12, 10], r'$\beta$': [30, 21], r'$\gamma$': [50, 35]}
+        bands = {r'$\delta$': [4, 2], r'$\theta$': [8, 5.5], r'$\alpha$': [13, 10], r'$\beta$': [32, 21], r'$\gamma$': [50, 35]}
         for band, [freq, text_pos] in bands.items():
             # Draw vertical line for each band
             ax.axvline(x=freq, color='grey', linestyle='--', linewidth=1, alpha=0.5)
