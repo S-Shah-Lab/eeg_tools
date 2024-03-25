@@ -51,7 +51,7 @@ class tools_mi():
             verbose (bool, optional): If True, prints detailed information
 
         Returns:
-            tuple: A tuple containing the processed signal data, state information, sampling rate, channel names, and block size
+            tuple: A tuple containing the processed signal data, state information, sampling rate, channel names, block size, and montage type
         """
 
         # Load the .dat file 
@@ -67,9 +67,10 @@ class tools_mi():
         # Extract stimulus-related information
         StimulusCode = states['StimulusCode']  # Stimulus codes
         StimulusBegin = states['StimulusBegin']  # Onsets of stimuli
-        # Extract saved file time 
+        # Extract file time on tape 
         fileTime = signal.shape[1] / fs
 
+        # Set montage type based on number of channels detected
         if   signal.shape[0] == 24:  montage_type = 'DSI_24'
         elif signal.shape[0] == 32:  montage_type = 'GTEC_32'
         elif signal.shape[0] == 128: montage_type = 'EGI_128'
@@ -304,13 +305,13 @@ class tools_mi():
         """
         # Initialize NoisyChannels with the RAW object
         NC = NoisyChannels(RAW, do_detrend=False)
+
         # Apply different criteria based on the function parameters to find bad channels
         if isSNR: NC.find_bad_by_SNR()
         if isCorrelation: NC.find_bad_by_correlation(correlation_secs=1.0, correlation_threshold=0.4, frac_bad=0.01)
         if isDeviation: NC.find_bad_by_deviation(deviation_threshold=5.0)
         if isHfNoise: NC.find_bad_by_hfnoise(HF_zscore_threshold=5.0)
         if isNanFlat: NC.find_bad_by_nan_flat()
-        if isRansac: NC.find_bad_by_ransac(n_samples=50, sample_prop=0.25, corr_thresh=0.75, frac_bad=0.4, corr_window_secs=5.0, channel_wise=False, max_chunk_size=None)
 
         # Collect names of identified bad channels
         ch_names_bad = []
@@ -320,10 +321,24 @@ class tools_mi():
         if isDeviation: ch_names_bad += bad_dict['bad_by_deviation']
         if isHfNoise: ch_names_bad += bad_dict['bad_by_hf_noise']
         if isNanFlat: ch_names_bad += bad_dict['bad_by_nan'] + bad_dict['bad_by_flat']
+        
+        # Mark identified bad channels in the RAW object
+        RAW.info["bads"].extend(np.unique(ch_names_bad).tolist())
+        print(f'Before RANSAC: {RAW.info["bads"]}')
+
+        # RANSAC requires BAD channels by other methods to be identified (optimal use)
+        # Re-initialize NoisyChannels with the RAW object and the new bad channels
+        NC = NoisyChannels(RAW, do_detrend=False)
+        if isRansac: NC.find_bad_by_ransac(n_samples=50, sample_prop=0.25, corr_thresh=0.75, frac_bad=0.4, corr_window_secs=5.0, channel_wise=False, max_chunk_size=None)
+
+        # Collect names of identified bad channels
+        bad_dict = NC.get_bads(as_dict=True)
         if isRansac: ch_names_bad += bad_dict['bad_by_ransac']
 
         # Mark identified bad channels in the RAW object
+        RAW.info["bads"] = []
         RAW.info["bads"].extend(np.unique(ch_names_bad).tolist())
+        print(f'After RANSAC: {RAW.info["bads"]}')
 
 
     def mark_BAD_region(self, RAW=None, block=None):
@@ -544,7 +559,7 @@ class tools_mi():
         return montage
 
 
-    def show_electrode(self, ch_location=None, ch_list=None, label=False, color='red', alpha=1):
+    def show_electrode(self, ch_location=None, ch_list=None, label=False, color='red', alpha=1, ax=None, alpha_back=0.5):
         """
         Displays electrode positions on a 2D plot.
 
@@ -559,7 +574,8 @@ class tools_mi():
             None
         """
         # Plot all electrodes in grey with partial opacity
-        plt.scatter([x[1] for x in ch_location], [x[2] for x in ch_location], color='grey', alpha=0.5)
+        if ax: ax.scatter([x[1] for x in ch_location], [x[2] for x in ch_location], color='grey', alpha=alpha_back)
+        else: plt.scatter([x[1] for x in ch_location], [x[2] for x in ch_location], color='grey', alpha=alpha_back)
         # Exit if no channels to highlight
         if not ch_list: 
             return None
@@ -568,10 +584,14 @@ class tools_mi():
             for i,ch in enumerate(ch_list): 
                 y = [[x[1],x[2]] for x in ch_location if x[0]==ch][0]
                 if type(color)==list and len(color)>1: 
-                    plt.scatter(y[0], y[1], color=color[i], alpha=alpha)
+                    if ax: ax.scatter(y[0], y[1], color=color[i], alpha=alpha)
+                    else: plt.scatter(y[0], y[1], color=color[i], alpha=alpha)
                 else: 
-                    plt.scatter(y[0], y[1], color=color, alpha=alpha)
-                if label: plt.text(y[0], y[1], ch)
+                    if ax: ax.scatter(y[0], y[1], color=color, alpha=alpha)
+                    else: plt.scatter(y[0], y[1], color=color, alpha=alpha)
+                if label: 
+                    if ax: ax.text(y[0], y[1], ch)
+                    else: plt.text(y[0], y[1], ch)
 
 
     def find_ch_central(self, ch_location=None, ch_list=None):
@@ -983,31 +1003,56 @@ class tools_mi():
         return -np.log(p)
 
 
-    def plot_topomap_L_R(self, ax=None, RAW=None, dataL=None, dataR=None, cmap=None, vlim=None, masks=None, mask_params=None, text_range=None, text=None):
-        # 
-        im,cm = mne.viz.plot_topomap(dataL, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim, mask=masks[0], mask_params=mask_params[0], show=False, axes=ax[0]) 
-        im,cm = mne.viz.plot_topomap(dataL, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim, mask=masks[1], mask_params=mask_params[1], show=False, axes=ax[0]) 
+    def plot_topomap_L_R(self, ax=None, RAW=None, dataL=None, dataR=None, cmap='viridis', vlim=None, masks=None, mask_params=None, text_range=None, text=None):
+        """
+        Plots left and right EEG topomaps using MNE's plot_topomap function.
+
+        Args:
+            ax (list of matplotlib.axes._subplots.AxesSubplot): List of axes on which to draw the topomaps for left, right, and colorbar.
+            RAW (mne.io.Raw): Raw MNE object containing the EEG data and channel information.
+            dataL (numpy.ndarray): Array containing the data for the left hemisphere topomap.
+            dataR (numpy.ndarray): Array containing the data for the right hemisphere topomap.
+            cmap (str or matplotlib.colors.Colormap, optional): Colormap to use for both topomaps. Default is viridis
+            vlim (tuple of float, optional): Value limits for the colormap.
+            masks (list of numpy.ndarray): List of masks to apply to the topomap data.
+            mask_params (list of dict): List of dictionaries specifying parameters for each mask.
+            text_range (str): Text to display as the title of the topomaps indicating the data range or condition.
+            text (bool, optional): Flag to indicate whether additional text labels should be added to the colorbar axis.
+        """
+
+        # Plot left hemisphere topomap
+        im, cm = mne.viz.plot_topomap(dataL, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim,
+                                      mask=masks[0], mask_params=mask_params[0], show=False, axes=ax[0])
+        im, cm = mne.viz.plot_topomap(dataL, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim,
+                                      mask=masks[1], mask_params=mask_params[1], show=False, axes=ax[0])
         ax[0].set_title(f"{text_range} (Left)")
-        im,cm = mne.viz.plot_topomap(dataR, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim, mask=masks[0], mask_params=mask_params[0], show=False, axes=ax[1])
-        im,cm = mne.viz.plot_topomap(dataR, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim, mask=masks[2], mask_params=mask_params[1], show=False, axes=ax[1])
+
+        # Plot right hemisphere topomap
+        im, cm = mne.viz.plot_topomap(dataR, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim,
+                                      mask=masks[0], mask_params=mask_params[0], show=False, axes=ax[1])
+        im, cm = mne.viz.plot_topomap(dataR, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim,
+                                      mask=masks[2], mask_params=mask_params[1], show=False, axes=ax[1])
         ax[1].set_title(f"{text_range} (Right)")
-        # Color bar
-        clim = dict(kind='value', lims=[-1,0,1])
+
+        # Prepare colorbar axis
+        clim = dict(kind='value', lims=[-1, 0, 1])
         divider = make_axes_locatable(ax[2])
         ax[2].set_yticks([])
         ax[2].set_xticks([])
         ax[2].axis('off')
-        ax[2] = divider.append_axes(position='left', size='20%', pad=0.5)
-        mne.viz.plot_brain_colorbar(ax[2], clim=clim, colormap=cmap, transparent=False, orientation='vertical', label=None)
-        if text: 
-            #ax[2].plot(0, 0.5, marker='o', markersize=8, markerfacecolor='lime')
-            #ax[2].plot(0, 0.35, marker='X', markersize=7, markerfacecolor='black')  # Plot a single blue point at (1,1)
-            ax[2].text(3, 0.26, 'Target', color='lime')
-            ax[2].text(3, 0.25,'Target', color='black')
-            #ax[2].text(3, 0.11, 'Interpolated', color='black')
-            ax[2].text(3, 0.1, 'Interpolated', color='black')
+        cax = divider.append_axes(position='left', size='20%', pad=0.5)
 
+        # Plot colorbar
+        mne.viz.plot_brain_colorbar(cax, clim=clim, colormap=cmap, transparent=False, orientation='vertical', label=None)
 
+        # Add optional text to colorbar axis
+        if text:
+            ax[2].text(3, 0.26, 'Target (.)', color='lime')
+            ax[2].text(3, 0.25, 'Target (.)', color='black')
+            ax[2].text(3, 0.1, 'Interpolated (x)', color='black')
+
+        # Note: Some lines seem to repeat with slight modifications (e.g., mask parameters). It's assumed these are intentional
+        # for demonstration purposes. Ensure this aligns with your actual processing needs.
 
 
 
