@@ -5,6 +5,7 @@ from BCI2000Tools.Electrodes import *
 from BCI2000Tools.Plotting import *
 import mne 
 import matplotlib.pyplot as plt
+import matplotlib 
 from matplotlib.colors import LinearSegmentedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyprep.prep_pipeline import PrepPipeline, NoisyChannels
@@ -12,8 +13,76 @@ from pyprep.prep_pipeline import PrepPipeline, NoisyChannels
 import eeg_dict # Contains dictionaries and libraries for electrodes locations 
 
 class tools_mi():
+    """
+    A class for loading and preprocessing EEG data files.
+
+    This class provides methods to import EEG data from various file formats,
+    apply preprocessing steps, and extract relevant features for further analysis.
+    It uses the MNE-Python library for handling EEG data information and preprocessing.
+    It uses the BCI2000Tools library for reading the original EEG data and handle different montages.
+    Other libraries are also used such as: pyprep, numpy, os, and matplotlib
+
+    Attributes:
+        None
+
+    Methods:
+        create_folder
+        import_file_dat
+        evaluate_mi_paradigm
+        import_file_fif
+        save_RAW
+        filter_data
+        spatial_filter
+        find_ch_index
+        make_RAW
+        make_RAW_stim
+        make_PREP
+        mark_BAD_region
+        evaluate_BAD_region
+        make_annotation_MI
+        change_StimulusCode
+        expand_onset
+        generate_onsets
+        make_montage
+        show_electrode
+        find_ch_central
+        find_ch_left
+        find_ch_right
+        find_ch_circle
+        find_ch_symmetry
+        interpolate
+        make_epochs
+        make_psd
+        Shuffle
+        ApproxPermutationTest
+        BootstrapTest
+        BootstrapResample
+        convert_dB
+        plot_frequency_bands
+        pvalue_interval
+        negP
+        plot_topomap_L_R
+    """
+
     def __init__(self):
         pass
+
+    def clean_path(self, path=None):
+        """
+        Cleans the path string to avoid errors.
+
+        Args:
+            path (str, optional): The directory path where some file is located.
+                                  If None, the current working directory is assumed.
+        """
+        # If path is None, use an empty string (assuming current directory)
+        # Else, ensure path ends with a '/'
+        if path is None:
+            path = ''
+        elif not path.endswith('/'):
+            path += '/'
+        return path
+
 
     def create_folder(self, path=None, folder_name=None, verbose=False):
         """
@@ -27,6 +96,8 @@ class tools_mi():
         Returns: 
             str: path to folder to be used later when saving files
         """
+        # Clean path string
+        path = self.clean_path(path)
         # Check if the folder does not already exist at the location
         if not os.path.exists(path + folder_name):
             # Create the folder at the specified location
@@ -53,7 +124,8 @@ class tools_mi():
         Returns:
             tuple: A tuple containing the processed signal data, state information, sampling rate, channel names, block size, and montage type
         """
-
+        # Clean path string
+        path = self.clean_path(path)
         # Load the .dat file 
         b = bcistream(path + file_name)
         signal, states = b.decode()
@@ -89,13 +161,32 @@ class tools_mi():
             print(f'Each tick corresponds to [s]: {1/fs}')
             print(f'Sampling rate [Hz]: {fs} ~~~ Time on file [s]: {fileTime}')
             print(f'Montage Detected: {montage_type}')
-            print(f'Signal range: [{np.min(signal)}, {np.mean(signal)}, {np.max(signal)}]\n')
-            print(f'StimulusCode: {np.unique(StimulusCode, return_counts=True)}')
+            print(f'Signal range: [{np.min(signal)}, {np.mean(signal)}, {np.max(signal)}]')
+            print(f'StimulusCode: {np.unique(StimulusCode, return_counts=True)}\n')
 
         return signal, states, fs, ch_names, blockSize, montage_type
 
 
     def evaluate_mi_paradigm(self, signal=None, states=None, fs=None, blockSize=None, verbose=True):
+        """
+        Evaluate information related to a specific motor imagery (MI) paradigm.
+
+        Args:
+            signal (numpy array): The time-series signal 
+            states (BCI2000Tools.Container.Bunch): object containing EEG file information such as stimuli
+            fs (float): sampling frequency
+            blockSize (float): size of the block used when EEG file was recorded
+            verbose (bool, optional): If True, prints detailed information
+
+            path (str, optional): The file path leading to the .dat file
+            file_name (str): The name of the .dat file to be imported.
+            
+
+        Returns:
+            tuple: A tuple containing the file length in seconds, the number of blocks recorded, the trials per block, 
+                   the initial gap before the first block is seconds, the duration of the cue in seconds, and the duration of each task in seconds
+        """
+
         # Define paradigm constants
         _nBlocks=8
         _trialsPerBlock=4
@@ -151,7 +242,8 @@ class tools_mi():
         Returns:
             tuple: A tuple containing the raw data object (`RAW`), the electrode montage (`montage`), and the sampling frequency (`fs`) extracted from the file.
         """
-
+        # Clean path string
+        path = self.clean_path(path)
         # Read the .fif file into a RAW object with data preloaded
         RAW = mne.io.read_raw(path + file_name, preload=True) 
         # Retrieve the montage used in the recording from the RAW object
@@ -175,6 +267,11 @@ class tools_mi():
         Returns:
             None: 
         """
+        # Clean path string
+        path = self.clean_path(path)
+        # Clean label string
+        if label is None: 
+            label = ''
         # Saves the RAW data to the specified file, overwriting any existing file
         RAW.save(path + file_name + label + '.fif', overwrite=True)
 
@@ -185,7 +282,7 @@ class tools_mi():
         The function converts the input signal to `float64` to ensure compatibility with the MNE-Python filtering function
 
         Args:
-            signal (array-like): The time-series signal to be filtered
+            signal (numpy array): The time-series signal to be filtered
             fs (float): The sampling frequency of the signal in Hz
             l_freq (float): The lower frequency bound of the filter in Hz
             h_freq (float): The upper frequency bound of the filter in Hz
@@ -204,7 +301,7 @@ class tools_mi():
         Args:
             sfilt (str): Specifies the type of spatial filter to apply. Accepts 'SLAP'
                          for Spatial Laplacian filtering or 'REF' for re-referencing.
-            ch_set (object): An object representing the set of channels/electrodes, from BCI2000Tools.Electrodes
+            ch_set (BCI2000Tools.Electrodes.ChannelSet): An object representing the set of channels/electrodes, from BCI2000Tools.Electrodes
             signal (np.array): The EEG signal data 
             flag_ch (str or list, optional): A str with channel names separated by spaces or a list of channel names, they are used differently based on the spatial filter selected
             verbose (bool, optional): If True, displays a graphical representation of the spatial filter matrix applied to the channels.
@@ -241,8 +338,8 @@ class tools_mi():
         Finds and returns the indices of specified channel(s) within a channel set.
 
         Args:
-            ch_set: The channel set containing channel labels, from BCI2000Tools.Electrodes
-            ch_name: A string or list of strings specifying the channel(s) to find (examples 'Cz', 'Cz C3 C4')
+            ch_set (BCI2000Tools.Electrodes.ChannelSet): The channel set containing channel labels, from BCI2000Tools.Electrodes
+            ch_name (str or list): A string or list of strings specifying the channel(s) to find (examples 'Cz', 'Cz C3 C4')
 
         Returns:
             List of indices for the specified channel(s), or None if a channel is the current reference.
@@ -256,12 +353,12 @@ class tools_mi():
         Constructs an MNE RAW object from signal data, sampling frequency, and channel names.
 
         Args:
-            signal: The EEG signal data as a 2D numpy array (channels x time points).
-            fs: Sampling frequency of the signal in Hz
-            ch_names: List of channel names corresponding to the signal rows
+            signal (numpy array): The EEG signal data as a 2D numpy array (channels x time points).
+            fs (float): Sampling frequency of the signal in Hz
+            ch_names (BCI2000Tools.Electrodes.ChannelSet): List of channel names corresponding to the signal rows
 
         Returns:
-            An MNE Raw object containing the EEG data
+            mne.io.Raw: An MNE Raw object containing the EEG data
         """
         # Create MNE info object specifying EEG data characteristics
         info = mne.create_info(ch_names=ch_names, sfreq=fs, ch_types="eeg")
@@ -275,9 +372,8 @@ class tools_mi():
         Adds stimulation channel data to an existing MNE RAW object.
 
         Args:
-            RAW: The original MNE RAW object containing EEG data.
-            states: Dictionary where keys are stim channel names and values are the data arrays.
-
+            RAW (mne.io.Raw): The original MNE RAW object containing EEG data.
+            states (BCI2000Tools.Container.Bunch): Dictionary where keys are stim channel names and values are the data arrays.
         """
         # Retrieve sampling frequency from the original RAW object
         fs = RAW.info['sfreq']
@@ -289,19 +385,18 @@ class tools_mi():
         RAW.add_channels([stim])
 
 
-    def make_PREP(self, RAW, isSNR=False, isCorrelation=False, isDeviation=False, isHfNoise=False, isNanFlat=False, isRansac=False):
+    def make_PREP(self, RAW=None, isSNR=False, isCorrelation=False, isDeviation=False, isHfNoise=False, isNanFlat=False, isRansac=False):
         """
         Identifies noisy channels in an MNE Raw object using various criteria and marks them as bad.
 
         Args:
-            RAW: The MNE Raw object to be processed.
-            isSNR: If True, identifies bad channels by signal-to-noise ratio.
-            isCorrelation: If True, identifies bad channels by correlation.
-            isDeviation: If True, identifies bad channels by deviation.
-            isHfNoise: If True, identifies bad channels by high-frequency noise.
-            isNanFlat: If True, identifies bad channels by NaN or flat signals.
-            isRansac: If True, identifies bad channels using RANSAC.
-
+            RAW (mne.io.Raw): The original MNE RAW object containing EEG data.RAW: The MNE Raw object to be processed.
+            isSNR (bool): If True, identifies bad channels by signal-to-noise ratio.
+            isCorrelation (bool): If True, identifies bad channels by correlation.
+            isDeviation (bool): If True, identifies bad channels by deviation.
+            isHfNoise (bool): If True, identifies bad channels by high-frequency noise.
+            isNanFlat (bool): If True, identifies bad channels by NaN or flat signals.
+            isRansac (bool): If True, identifies bad channels using RANSAC.
         """
         # Initialize NoisyChannels with the RAW object
         NC = NoisyChannels(RAW, do_detrend=False)
@@ -346,9 +441,8 @@ class tools_mi():
         Opens an interactive plot for visually identifying and marking bad regions in the EEG data.
 
         Args:
-            RAW: The MNE Raw object containing the EEG data.
-            block: Determines if the plot should block execution until closed. If True, execution is halted until the plot is manually closed
-
+            RAW (mne.io.Raw): The original MNE RAW object containing EEG data.
+            block (bool): Determines if the plot should block execution until closed. If True, execution is halted until the plot is manually closed
         """
         # Initialize an empty Annotations object with a 'BAD_region' label
         annot = mne.Annotations([0], [0], ['BAD_region'])
@@ -365,10 +459,9 @@ class tools_mi():
         Evaluates and summarizes bad regions in the EEG data based on annotations.
 
         Args:
-            RAW: The MNE Raw object containing the EEG data and annotations.
-            label: The label used to identify regions of interest in the annotations. Defaults to 'BAD_region'.
-            max_duration: The maximum duration expected for the data, used to calculate the percentage of data marked as bad. Defaults to 418 seconds but it should be the total file time
-
+            RAW (mne.io.Raw): The original MNE RAW object containing EEG data and annotations.
+            label (str): The label used to identify regions of interest in the annotations. Defaults to 'BAD_region'.
+            max_duration (float): The maximum duration expected for the data, used to calculate the percentage of data marked as bad. Defaults to 418 seconds but it should be the total file time
         """
         # Extract annotations from the RAW object
         annot = RAW.annotations
@@ -378,10 +471,29 @@ class tools_mi():
         print(f" --> {label}: {len(bad_regions_id)} sections, ~{round(sum(bad_regions_id),1)} s [{round(sum(bad_regions_id)/max_duration*100,1)}%] --> Bad channels: {RAW.info['bads']}")
 
 
-    def make_annotation_MI(self, RAW, fs, nBlocks=None, trialsPerBlock=None, initialSec=None, stimSec=None, taskSec=None, rejectSec=None, nSplit=None, fileTime=None):
+    def make_annotation_MI(self, RAW=None, fs=None, nBlocks=None, trialsPerBlock=None, initialSec=None, stimSec=None, taskSec=None, rejectSec=None, nSplit=None, fileTime=None):
+        """
+        Generate annotations on a mne.io.Raw object for the motor imagery paradigm.
+
+        Args: 
+            RAW (mne.io.Raw): The original MNE RAW object containing EEG data.
+            fs (float): EEG sampling frequency.
+            nBlocks (int): Number of blocks in the MI paradigm.
+            trialsPerBlock (int): Number of trials (left, rest after left, right, rest after right) per block.
+            initialSec (float): Length of initial gap before the first cue in seconds.
+            stimSec (float): Length of cues in seconds.
+            taskSec (float): Length of tasks in seconds.
+            rejectSec (float): Length of rejected window after the cue in seconds (Used in analysis).
+            nSplit (int): Number of windows to consider for each trial, determine the number of splits for the task EEG signal.
+            fileTime (float): Length of total file in seconds.
+
+        Returns: 
+            mne.io.Raw: The original MNE RAW object with annotations added.
+        """
+
         '''
-        # This is a brute force method (takes time, and it's the ideal one for a new paradigm
-        # Since the paradigm is the same for now we know the target locations of the ticks we need to modify so we use an alternative method (faster)
+        # This is a brute force method (takes time as it check for the onset of each StimulusCode), it's the ideal one for variable paradigms
+        # Since the paradigm is always the same, we know the target locations of the ticks we need to modify so we use an alternative method (faster)
         # Modify StimulusCode to differentiate resting periods after moving LEFT vs RIGHT
         new_StimulusCode = RAW['StimulusCode'][0][0].copy()
         change=False
@@ -392,19 +504,41 @@ class tools_mi():
         RAW['StimulusCode'][0][0] = new_StimulusCode
         '''
 
+        # Convert times in seconds to number of samples with sampling frequency (note: the words Samples and Ticks are used interchangeably in this function)
         initialTicks = int(initialSec * fs) # initial length in Ticks
         stimTicks = int(stimSec * fs) # stimulus length in Ticks (cue)
         taskTicks = int(taskSec * fs) # task length in Ticks (performance)
         rejectTicks = int(rejectSec * fs) # rejection length in Ticks (after cue, subtracted from performance)
 
-        # This is the alternative method (faster)
+        # This is the alternative method (The faster method starts here)
         new_StimulusCode = RAW['StimulusCode'][0][0].copy()
 
-        def change_StimulusCode(list_, nBlocks, trialsPerBlock, initialTicks, stimTicks, taskTicks, posInBlock, newStimCode):
+        def change_StimulusCode(list_=None, nBlocks=None, trialsPerBlock=None, initialTicks=None, stimTicks=None, taskTicks=None, posInBlock=None, newStimCode=None):
+            """
+            Changes the StimulusCode associated to the rest-after-right trials to differentiate them from the rest-after-left trials.
+
+            Args: 
+                list_ (numpy array): Array with StimulusCodes from mne.io.Raw.
+                nBlocks (int): Number of blocks in the MI paradigm.
+                trialsPerBlock (int): Number of trials (left, rest after left, right, rest after right) per block.
+                initialTicks (int): Number of samples in initial gap before the first cue.
+                stimTicks (int): Number of samples in cues.
+                taskTicks (int): Number of samples in tasks.
+                posInBlock (int): Position in a block of the trial whose StimulusCode will be changed.
+                newStimCode (int): New StimulusCode to use. 
+
+            Returns: 
+                None
+            """
+
+            # Change the StimulsCode in specific locations
             for i in range(nBlocks):
+                # Determines the starting samples
                 start = initialTicks + (stimTicks + taskTicks) * (posInBlock-1 + trialsPerBlock*i)
+                # Determines the ending samples
                 end = start + stimTicks
                 try: 
+                    # Overwrite the StimulusCode
                     list_[start:end] = [newStimCode]*stimTicks
                 except ValueError:
                     break
@@ -412,6 +546,7 @@ class tools_mi():
         # Changing rest-after-right trials (4th position with code 3) to newStimCode 4 to differentiate them from rest-after-left trials
         change_StimulusCode(new_StimulusCode, nBlocks, trialsPerBlock, initialTicks, stimTicks, taskTicks, posInBlock=4, newStimCode=4)
 
+        # Plot the StimulusCode before and after the change 
         fig, (ax,ax1) = plt.subplots(nrows=1, ncols=2, figsize=(12,4))
         ax.plot(new_StimulusCode, label='new_StimulusCode')
         ax.plot(RAW['StimulusCode'][0][0], label='StimulusCode')
@@ -433,6 +568,7 @@ class tools_mi():
         ax2.tick_params(axis='x', labelcolor='red') 
         plt.show()
 
+        # Print information regarding the MI paradigm
         print(f'\n~~~~~~~~ ANNOTATIONS ~~~~~~~~')
         print(f'File length: {len(new_StimulusCode)/fs} s or {len(new_StimulusCode)} ticks')
         print(f'File length (remove initial pause): {(len(new_StimulusCode)-initialTicks)/fs} s or {len(new_StimulusCode)-initialTicks} ticks')
@@ -441,14 +577,41 @@ class tools_mi():
         print(f'\tStim length: {(stimTicks)/fs} s or {stimTicks} ticks')
         print(f'\tTask length: {(taskTicks)/fs} s or {taskTicks} ticks')
 
-        def expand_onset(onset, nSplit, taskSec, rejectSec):
+        def expand_onset(onset=None, nSplit=None, taskSec=None, rejectSec=None):
+            """
+            Create a list of onset timing for the annotations of the epochs withing a specific trial, given the initial onset of the trial
+
+            Args:
+                onset (float): Time at which the task section of a trial starts.
+                nSplit (int): Number of splits to use for the task window.
+                taskSec (float): Length of task is seconds.
+                rejectSec (float): Length of reject after cue in seconds.
+
+            Returns:
+                list: contains the unique onset timing for annotations on the mne.io.Raw
+            """
             if nSplit > 1: 
                 for x in onset: 
                     expand = np.linspace(x, x+(taskSec-rejectSec), nSplit+1)
                     onset = onset + list(expand[:-1])
             return list(np.unique(onset))
 
-        def generate_onsets(start, end, stimSec, taskSec, trialsPerBlock, nSplit, rejectSec):
+        def generate_onsets(start=None, end=None, stimSec=None, taskSec=None, trialsPerBlock=None, nSplit=None, rejectSec=None):
+            """
+            Create a list of onset timing and durations for the annotations of the epochs withing a specific trial
+            
+            Args:
+                start (float): Time start of a specific trial.
+                end (float): Time end of that specific trial. Generally fileTime which identifies the end of the file (no more trials after that).
+                stimSec (float): Length of cues in seconds.
+                taskSec (float): Length of tasks in seconds.
+                trialsPerBlock (int): Number of trials (left, rest after left, right, rest after right) per block.
+                nSplit (int): Number of windows to consider for each trial, determine the number of splits for the task EEG signal.
+                rejectSec (float): Length of rejected window after the cue in seconds (Used in analysis).
+    
+            Returns:
+                (list, list): list of onsets, list of duration of each epoch
+            """
             onset = [x+rejectSec for x in np.arange(start, end, (stimSec+taskSec)*trialsPerBlock)] # in seconds [5,57,109,161,...] without rejectSec for example
             onset = expand_onset(onset, nSplit, taskSec, rejectSec)
             duration = [(taskSec-rejectSec)/nSplit for x in np.arange(len(onset))] # in seconds
@@ -464,17 +627,17 @@ class tools_mi():
         description2 = ['right' for x in onset2]
         #print(len(onset2), len(duration2), len(description2))
 
-        # annotate left hand pause
+        # annotate left hand rest
         onset3, duration3 = generate_onsets(initialSec + taskSec*1 + stimSec*2, fileTime, stimSec, taskSec, trialsPerBlock, nSplit, rejectSec) # in seconds [18,70,122,174,...] without rejectSec
         description3 = ['left_rest' for x in onset3]
         #print(len(onset3), len(duration3), len(description3))
 
-        # annotate right hand pause
+        # annotate right hand rest
         onset4, duration4 = generate_onsets(initialSec + taskSec*3 + stimSec*4, fileTime, stimSec, taskSec, trialsPerBlock, nSplit, rejectSec) # in seconds [44,96,148,200,...] without rejectSec
         description4 = ['right_rest' for x in onset4]
         #print(len(onset4), len(duration4), len(description4))
 
-        # annotate cue regions inter-trial
+        # annotate cue regions
         onset5 = [x for x in np.arange(initialSec, fileTime, stimSec+taskSec)] # in seconds [2,15,28,41,...]
         duration5 = [stimSec + rejectSec for x in onset5]
         description5 = ['cue']*len(duration5)
@@ -489,10 +652,12 @@ class tools_mi():
         description6 = ['BAD_region']*len(duration6) # initial region
         #print(len(onset6), len(duration6), len(description6))
 
+        # Combine all lists 
         onset = onset1 + onset2 + onset3 + onset4 + onset5 + onset6
         duration = duration1 + duration2 + duration3 + duration4 + duration5 + duration6
         description = description1 + description2 + description3 + description4 + description5 + description6
 
+        # Generate information for specific epochs within each trial (left_1, left_2, ...)
         for ith in range(nBlocks):
             onset += onset1[nSplit*ith:nSplit*(ith+1)]
             duration += duration1[nSplit*ith:nSplit*(ith+1)]
@@ -510,20 +675,19 @@ class tools_mi():
             duration += duration4[nSplit*ith:nSplit*(ith+1)]
             description += [f'right_rest_{int(ith+1)}']*len(onset4[nSplit*ith:nSplit*(ith+1)])
 
+        # Set annotation to mne.io.Raw
         my_annot = mne.Annotations(onset=onset, duration=duration, description=description)
         RAW.set_annotations(my_annot)
         #print(RAW.annotations)
 
+        # Plot annotations using MNE
         events_from_annot, event_dict = mne.events_from_annotations(RAW)
-        #print(event_dict)
-        #print(events_from_annot[:])
-
         fig = mne.viz.plot_events(events_from_annot, sfreq=fs, first_samp=RAW.first_samp, event_id=event_dict)
         fig.subplots_adjust(right=0.7)
         plt.show()
 
         return RAW
-
+    
 
     def make_montage(self, montage_type=None, ch_to_show=None, conv_dict=None, verbose=False):
         """
@@ -536,7 +700,6 @@ class tools_mi():
 
         Returns:
             montage: The MNE Montage object created based on the specified parameters.
-
         """
         # Select the appropriate standard montage based on the specified type
         if montage_type in ['DSI_24', 'GTEC_32']: 
@@ -569,6 +732,8 @@ class tools_mi():
             label (bool): If True, display labels for the highlighted channels.
             color (str): Color for the highlighted channels. Default is 'red'.
             alpha (float): Opacity level for the highlighted channels.
+            ax (matplotlib.axes.Axes): Axis containing the plot.
+            alpha_back (float): Opacity of background channels. 
 
         Returns:
             None
@@ -990,7 +1155,7 @@ class tools_mi():
         return p_down, p, p_up
 
 
-    def negP(self, p):
+    def negP(self, p=None):
         """
         Calculates the negative natural logarithm of a probability.
 
@@ -1035,7 +1200,7 @@ class tools_mi():
         ax[1].set_title(f"{text_range} (Right)")
 
         # Prepare colorbar axis
-        clim = dict(kind='value', lims=[-1, 0, 1])
+        clim = dict(kind='value', lims=[vlim[0], 0, vlim[1]])
         divider = make_axes_locatable(ax[2])
         ax[2].set_yticks([])
         ax[2].set_xticks([])
@@ -1047,19 +1212,102 @@ class tools_mi():
 
         # Add optional text to colorbar axis
         if text:
-            ax[2].text(3, 0.26, 'Target (.)', color='lime')
-            ax[2].text(3, 0.25, 'Target (.)', color='black')
-            ax[2].text(3, 0.1, 'Interpolated (x)', color='black')
+            ax[2].text(0, 0.26, 'Target (.)', color='lime')
+            ax[2].text(0, 0.25, 'Target (.)', color='black')
+            ax[2].text(0, 0.1, 'Interpolated (x)', color='black')
 
         # Note: Some lines seem to repeat with slight modifications (e.g., mask parameters). It's assumed these are intentional
         # for demonstration purposes. Ensure this aligns with your actual processing needs.
 
 
+    # Create alternative cmap
+    def make_cmap(self, cmap, name, n=256):
+        """
+        Create an alternative cmap
+        """
+        cmap = LinearSegmentedColormap(name, cmap, n)
+        """
+        if name not in plt.colormaps():
+            try:
+                matplotlib.cm.register_cmap(name=name, cmap=cmap)
+            except Exception as e:
+                print(f"Failed to register colormap '{name}'. Error: {str(e)}")
+        """
+        return cmap
+
+    # Define the colormap dictionary
+    kelvin_i = {
+        'red': (
+            (0.000, 0.0, 0.0),
+            (0.350, 0.0, 0.0),
+            (0.500, 1.0, 1.0),
+            (0.890, 1.0, 1.0),
+            (1.000, 0.5, 0.5),
+        ),
+        'green': (
+            (0.000, 0.0, 0.0),
+            (0.125, 0.0, 0.0),
+            (0.375, 1.0, 1.0),
+            (0.640, 1.0, 1.0),
+            (0.910, 0.0, 0.0),
+            (1.000, 0.0, 0.0),
+        ),
+        'blue': (
+            (0.000, 0.5, 0.5),
+            (0.110, 1.0, 1.0),
+            (0.500, 1.0, 1.0),
+            (0.650, 0.0, 0.0),
+            (1.000, 0.0, 0.0),
+        ),
+    }
+    # Create and register the custom colormap
+    kelvin_i_cmap = make_cmap(kelvin_i, 'kelvin_i', 256)
+
+    def make_simple_cmap(self, c1=None, c2=None, c3=None):
+        """
+        Create a simple 3-color cmap
+
+        Args: 
+            c1 (str): Color to set at the lower value
+            c2 (str): Color to set in the middle
+            c3 (str): Color to set at the higher value 
+
+        Returns: 
+            cmap (matplotlib.colors.LinearSegmentedColormap)
+        """
+        colors = [(0.0, c1),     # Color at -1
+                  (0.5, c2),     # Color at 0
+                  (1.0, c3)]     # Color at 1
+
+        return LinearSegmentedColormap.from_list('custom_cmap', colors)
 
 
 
 
 class SumsR2:
+    """
+    A class for performing permutation and bootstrap tests on PSDs which are transformed into eta-square values at each electrode.
+
+    This class provides methods to perform statistical tests for motor imagery starting from PSDs.
+    An object is built which is able to handle contralateral and ipsilateral electrodes based on the test being performed. 
+    Also the frequency band of interest is specified at each object initialization.
+
+    Attributes:
+        ch_set (BCI2000Tools.Electrodes.ChannelSet): An object representing the set of channels/electrodes, from BCI2000Tools.Electrodes
+        dict_symm (dict): A dictionary containing electrodes names and their symmetric about the X=0 axis in the XY plane
+        isContralat (list): List of electrodes in the contralateral hemisphere. The corresponding ipsilateral electrodes are found.
+        bins (list): Indices of the bins to consider for a specific frequency band. 
+        transf (str): Transformation to apply to the PSDs. 
+
+    Methods:
+        CalculateEtas2
+        CalculateR2
+        Transform
+        DifferenceOfSumsR2
+        DifferenceOfR2
+        FindSymmetric
+    """
+
     def __init__(self, ch_set=None, dict_symm=None, isContralat=None, bins=None, transf='r2'):
         self.ch_set = ch_set
         self.ch_names = np.array(self.ch_set.get_labels())
@@ -1156,6 +1404,7 @@ class SumsR2:
         else:
             return r * r  # Unsigned R^2
 
+
     def Transform(self, x=None, isTreatment=None):
         """
         Applies a specified transformation to the data based on the set transformation type.
@@ -1188,9 +1437,11 @@ class SumsR2:
             The difference between the sum of the transformed data for contralateral electrodes and
             the sum for ipsilateral electrodes, based on the specified frequency bins.
         """
-        # Average the data (PSDs) within the specified frequency bins (trial, ch, bin)
+        # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
         x = np.mean(x[:, :, self.bins[0]:self.bins[-1]], axis=2)
-        # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch)
+        # Transform PSDs to dB
+        x = 10 * np.log(x * 1e12)
+        # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch) -> (ch,)
         x = self.Transform(x, isTreatment)
         # Sum the averages for contralateral electrodes
         x1 = x[self.isContralat]
@@ -1219,9 +1470,11 @@ class SumsR2:
             - The output array `r2` is initialized to zeros and filled with the computed R² differences for electrodes identified as
               contralateral, with the ipsilateral differences being directly subtracted.
         """
-        # Average the data (PSDs) within the specified frequency bins (trial, ch, bin)
+        # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
         x = np.mean(x[:, :, self.bins[0]:self.bins[-1]], axis=2)
-        # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch)
+        # Transform PSDs to dB
+        x = 10 * np.log(x * 1e12)
+        # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch) -> (ch,)
         x = self.Transform(x, isTreatment)
         # Sum the averages for contralateral electrodes
         x1 = x[self.isContralat]

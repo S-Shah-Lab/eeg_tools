@@ -30,7 +30,9 @@ if __name__ == '__main__':
     clean_bool = opts.c
     file_path, file_name = os.path.split(opts.f)
     resolution = opts.r
-
+    secPerSegment = 1/resolution
+    secOverlap = secPerSegment/2
+    
     ch_location = eeg_dict.ch_location
 
     fmin = 1
@@ -162,17 +164,42 @@ if __name__ == '__main__':
     # Create Epochs and PSDs
     events_from_annot, event_dict = mne.events_from_annotations(RAW_SL)
 
-    def epochs_to_psd(RAW=None, fs=None, event_dict=None, label=None, events_from_annot=None, tmin=None, tmax=None, twindow=None, fmin=None, fmax=None, resolution=None, secPerSegment=1, secOverlap=0.5, nSkip=0):
+    def epochs_to_psd(RAW=None, fs=None, event_dict=None, label=None, events_from_annot=None, tmin=None, tmax=None, twindow=None, fmin=None, fmax=None, resolution=None, secPerSegment=None, secOverlap=None, nSkip=[]):
+        """
+        Generate epochs and psds based on pre-generated annotations
+
+        Args: 
+            RAW (mne.io.Raw): Raw object containing annotations and EEG signal.
+            fs (float): EEG sampling frequency.
+            event_dict (dict): Dictionary with annotation names as keys and event id as values.
+            label (str): Initial part of labels to assign to each epoch.
+            events_from_annot (numpy ndarray): Array containing [duration in samples, /, event id] for all annotations.
+            tmin (float): Initial time of an epoch in seconds.
+            tmax (float): Final time of an epoch in seconds. tmax - tmin = Length of an epoch in seconds.
+            twindow (float): Length of window to be split into epochs in seconds. 
+            fmin (float): Min frequency to be considered in PSDs.
+            fmax (float): Max frequency to be consdiered in PSDs.
+            resolution (float): Bin width in frequency space. 
+            secPerSegment (float): Length of segments in PSDs Welch method in seconds.
+            secOverlap (float): Length of overlap between segments in PSDs Welch method in seconds.
+            nSkip (list): List of Epochs within a trial to skip. E.g. [0,3,4]
+
+        Returns: 
+            numpy array: Return the PSDs associated to a specific trial.
+        """
+        # Generate all things
         psds_ = []
         for i in range(1,9):
-            if i>nSkip: 
+            if i not in nSkip: 
                 try:
+                    # Generate Epochs
                     epochs_ = MI.make_epochs(RAW, 
                                              tmin=tmin, 
                                              tmax=tmax,  
                                              event_id=event_dict[label+f'{i}'], 
                                              events_from_annot=events_from_annot, verbose=False)
 
+                    # Generate PSDs
                     psds_.append(MI.make_psd(epochs_, fs=fs, 
                                              resolution=resolution, 
                                              tmin=tmin, tmax=tmax, 
@@ -181,28 +208,29 @@ if __name__ == '__main__':
                                              nOverlap=int(secOverlap * fs), 
                                              aggregate=True, verbose=False))
                 except KeyError:
+                    # Print label of Epoch if not found, PSDs also will not exist
                     print(f'{label}{i} not found')
             else: 
-                print(f'Skipping epochs {i}')
+                # Print label of Epoch if being skipped
+                print(f'Skipping Epoch {i}')
         return np.stack(psds_)
 
-    nSkip = 0
-    psds_left = epochs_to_psd(RAW_SL, fs, event_dict, 'left_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=1, secOverlap=0.5, nSkip=nSkip)
-    psds_left_rest = epochs_to_psd(RAW_SL, fs, event_dict, 'left_rest_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=1, secOverlap=0.5, nSkip=nSkip)
-    psds_right = epochs_to_psd(RAW_SL, fs, event_dict, 'right_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=1, secOverlap=0.5, nSkip=nSkip)
-    psds_right_rest = epochs_to_psd(RAW_SL, fs, event_dict, 'right_rest_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=1, secOverlap=0.5, nSkip=nSkip)
-
-
-    # PLOT PSDS ACCORDING TO 
-
+    # Generate PSDs for each type of trial
+    nSkip = []
+    psds_left = epochs_to_psd(RAW_SL, fs, event_dict, 'left_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=secPerSegment, secOverlap=secOverlap, nSkip=nSkip)
+    psds_left_rest = epochs_to_psd(RAW_SL, fs, event_dict, 'left_rest_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=secPerSegment, secOverlap=secOverlap, nSkip=nSkip)
+    psds_right = epochs_to_psd(RAW_SL, fs, event_dict, 'right_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=secPerSegment, secOverlap=secOverlap, nSkip=nSkip)
+    psds_right_rest = epochs_to_psd(RAW_SL, fs, event_dict, 'right_rest_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=secPerSegment, secOverlap=secOverlap, nSkip=nSkip)
 
     # Identify Left vs Right electrodes based on montage
     isLeft_ch = [x for x in MI.find_ch_circle(ch_location, radius=0.74) if x in MI.find_ch_left(ch_location)]
     isRight_ch = [x for x in MI.find_ch_circle(ch_location, radius=0.74) if x in MI.find_ch_right(ch_location)]
 
+    # Identify Left vs Right electrodes based on montage
     isLeft = np.array([True if x in isLeft_ch else False for x in ch_setSLAP.get_labels()])
     isRight = np.array([True if x in isRight_ch else False for x in ch_setSLAP.get_labels()])
 
+    # Plot target electrodes
     fig = plt.figure(figsize=(8, 4))
     plt.subplot(121)
     left_labels = [x for x, y in zip(ch_setSLAP.get_labels(), isLeft) if y == True]
@@ -216,67 +244,74 @@ if __name__ == '__main__':
     plt.savefig(f'{path_to_folder}/target_electrodes.pdf')
     plt.show()
 
-
+    # Generate frequency bins in each frequency band
     bins_ticks = np.arange(fmin, fmax+1, int(resolution))
     theta_ticks = np.where((bins_ticks>=4) & (bins_ticks<=7))[0]
     alpha_ticks = np.where((bins_ticks>=8) & (bins_ticks<=12))[0]
     beta_ticks = np.where((bins_ticks>=13) & (bins_ticks<=30))[0]
 
-    # Create statistics to test in nonparametric tests
+    # Initialize useful things for the statistical test
     N = 1999
-    perm_bool = False
-    boot_bool = True
+    perm_bool = True # Do Permutation test
+    boot_bool = True # Do Bootstrap test
     
     p_left = []
     p_right = []
     labels = []
 
-    # LEFT HAND TEST
+    # LEFT HAND Statistical Test begins
     x = np.vstack([psds_left_rest, psds_left])
+    # Generate labels for rest (True) and task (False)
     isTreatment = np.arange(x.shape[0]) < psds_left_rest.shape[0]
 
-    # theta
+    # Theta frequency band
     T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=theta_ticks)
     if perm_bool:
         p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
         p_left.append(p)
+        labels.append(r'4-7 Hz (P)')
     if boot_bool:
         p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_left.append(p)
+        labels.append(r'4-7 Hz (B)')
         
-    labels.append(r'4-7 Hz')
     r2_left_theta = T.DifferenceOfR2(x, isTreatment)
     
-    # alpha
+
+    # Alpha frequency band
     T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=alpha_ticks)
     if perm_bool:
         p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
         p_left.append(p)
+        labels.append(r'8-12 Hz (P)')
     if boot_bool:
         p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_left.append(p)
+        labels.append(r'8-12 Hz (B)')
 
-    labels.append(r'8-12 Hz')
     r2_left_alpha = T.DifferenceOfR2(x, isTreatment)
     
-    # beta
+
+    # Beta frequency band
     T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=beta_ticks)
     if perm_bool:
         p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
         p_left.append(p)
+        labels.append(r'13-30 Hz (P)')
     if boot_bool:
         p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_left.append(p)
+        labels.append(r'13-30 Hz (B)')
 
-    labels.append(r'13-30 Hz')
     r2_left_beta = T.DifferenceOfR2(x, isTreatment)
 
 
-    # RIGHT HAND TESTS
+    # RIGHT HAND Statistical Test begins
     x = np.vstack([psds_right_rest, psds_right])
+    # Generate labels for rest (True) and task (False)
     isTreatment = np.arange(x.shape[0]) < psds_right_rest.shape[0]
 
-    # theta
+    # Theta frequency band
     T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=theta_ticks)
     if perm_bool:
         p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
@@ -284,11 +319,11 @@ if __name__ == '__main__':
     if boot_bool:
         p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_right.append(p)
-        
-    #labels.append(r'4-7 Hz')
+
     r2_right_theta = T.DifferenceOfR2(x, isTreatment)
 
-    # alpha
+
+    # Alpha frequency band
     T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=alpha_ticks)
     if perm_bool:
         p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
@@ -297,10 +332,10 @@ if __name__ == '__main__':
         p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_right.append(p)
         
-    #labels.append(r'8-12 Hz')
     r2_right_alpha = T.DifferenceOfR2(x, isTreatment)
 
-    # beta
+
+    # Beta frequency band
     T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=beta_ticks)
     if perm_bool:
         p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
@@ -309,18 +344,18 @@ if __name__ == '__main__':
         p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_right.append(p)
 
-    #labels.append(r'13-30 Hz')
     r2_right_beta = T.DifferenceOfR2(x, isTreatment)
 
 
-    # MERGE LEFTvsRIGHT TESTS
+    # Plot p-values extracted by Statistical tests
+    # This is a Left - Right view
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 2.5), sharey=True)
     y_max = 0.5
     y_min = -0.5
     y = np.linspace(start=y_max, stop=y_min, num=len(p_left)+2)
     y = y[1:-1]
     deltay = 0.075
-    # LEFT RESULTS
+    # Left results
     #---------
     x_values = []
     xUp_values = []
@@ -346,7 +381,7 @@ if __name__ == '__main__':
     ax1.set_yticks(y)
     ax1.set_yticklabels(labels)
     ax1.legend(loc='upper left')
-    # RIGHT RESULTS
+    # Right results
     #---------
     x_values = []
     xUp_values = []
@@ -375,45 +410,7 @@ if __name__ == '__main__':
     plt.show()
     
 
-    # Create alternative cmap
-    def make_cmap(cmap, name, n=256):
-        cmap = LinearSegmentedColormap(name, cmap, n)
-        if name not in plt.colormaps():
-            try:
-                matplotlib.cm.register_cmap(name=name, cmap=cmap)
-            except Exception as e:
-                print(f"Failed to register colormap '{name}'. Error: {str(e)}")
-        return cmap
-    # Define the colormap dictionary
-    kelvin_i = {
-        'red': (
-            (0.000, 0.0, 0.0),
-            (0.350, 0.0, 0.0),
-            (0.500, 1.0, 1.0),
-            (0.890, 1.0, 1.0),
-            (1.000, 0.5, 0.5),
-        ),
-        'green': (
-            (0.000, 0.0, 0.0),
-            (0.125, 0.0, 0.0),
-            (0.375, 1.0, 1.0),
-            (0.640, 1.0, 1.0),
-            (0.910, 0.0, 0.0),
-            (1.000, 0.0, 0.0),
-        ),
-        'blue': (
-            (0.000, 0.5, 0.5),
-            (0.110, 1.0, 1.0),
-            (0.500, 1.0, 1.0),
-            (0.650, 0.0, 0.0),
-            (1.000, 0.0, 0.0),
-        ),
-    }
-    # Create and register the custom colormap
-    kelvin_i_cmap = make_cmap(kelvin_i, 'kelvin_i', 256)
-
-
-    # PLOT TOPOPLOTS WITH R2
+    # Plot topoplots with r2
     # Identify interpolated channels to show on the topomap
     mask = np.array([True if x in old_ch_bads else False for x in ch_setSLAP.get_labels()])
     mask_params1 = dict(marker='X', markersize=7, markerfacecolor='black')
@@ -421,28 +418,16 @@ if __name__ == '__main__':
     mask_right = np.array([True if x in isLeft_ch else False for x in ch_setSLAP.get_labels()])
     mask_left = np.array([True if x in isRight_ch else False for x in ch_setSLAP.get_labels()])
     mask_params2 = dict(marker='o', markersize=4, markerfacecolor='lime', alpha=0.75)
-
+    # Plot
     fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(6, 6))
+    # Make colormap for topoplots
+    custom_cmap = MI.make_simple_cmap('blue', 'white', 'red')
     # Plot topoplots - Theta
-    colors = [(0.0, 'blue'),     # Color at -1
-              (0.5, 'white'),    # Color at 0
-              (1.0, 'red')]      # Color at 1
-    custom_cmap_theta = LinearSegmentedColormap.from_list('custom_cmap', colors)
-    MI.plot_topomap_L_R([axes[0,0],axes[0,1],axes[0,2]], RAW_SL, r2_left_theta, r2_right_theta, custom_cmap_theta, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '4-7 Hz', True)
-
+    MI.plot_topomap_L_R([axes[0,0],axes[0,1],axes[0,2]], RAW_SL, r2_left_theta, r2_right_theta, custom_cmap, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '4-7 Hz', True)
     # Plot topoplots - Alpha
-    #colors = [(0.0, 'turquoise'),     # Color at -1
-    #          (0.5, 'white'),    # Color at 0
-    #          (1.0, 'magenta')]      # Color at 1#
-    custom_cmap_alpha = LinearSegmentedColormap.from_list('custom_cmap', colors)
-    MI.plot_topomap_L_R([axes[1,0],axes[1,1],axes[1,2]], RAW_SL, r2_left_alpha, r2_right_alpha, custom_cmap_alpha, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '8-12 Hz', False)
-
+    MI.plot_topomap_L_R([axes[1,0],axes[1,1],axes[1,2]], RAW_SL, r2_left_alpha, r2_right_alpha, custom_cmap, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '8-12 Hz', False)
     # Plot topoplots - Beta
-    #colors = [(0.0, 'royalblue'),     # Color at -1
-    #          (0.5, 'white'),    # Color at 0
-    #          (1.0, 'orangered')]      # Color at 1
-    custom_cmap_beta = LinearSegmentedColormap.from_list('custom_cmap', colors)
-    MI.plot_topomap_L_R([axes[2,0],axes[2,1],axes[2,2]], RAW_SL, r2_left_beta, r2_right_beta, custom_cmap_beta, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '13-30 Hz', False)
+    MI.plot_topomap_L_R([axes[2,0],axes[2,1],axes[2,2]], RAW_SL, r2_left_beta, r2_right_beta, custom_cmap, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '13-30 Hz', False)
     fig.tight_layout()
     plt.savefig(f'{path_to_folder}/topoR2_atRes_{resolution}_Hz.png')
     plt.savefig(f'{path_to_folder}/topoR2_atRes_{resolution}_Hz.pdf')
