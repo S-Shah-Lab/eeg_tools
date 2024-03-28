@@ -12,7 +12,7 @@ from pyprep.prep_pipeline import PrepPipeline, NoisyChannels
 
 import eeg_dict # Contains dictionaries and libraries for electrodes locations 
 
-class tools_mi():
+class Tools():
     """
     A class for loading and preprocessing EEG data files.
 
@@ -53,14 +53,8 @@ class tools_mi():
         interpolate
         make_epochs
         make_psd
-        Shuffle
-        ApproxPermutationTest
-        BootstrapTest
-        BootstrapResample
         convert_dB
         plot_frequency_bands
-        pvalue_interval
-        negP
         plot_topomap_L_R
     """
 
@@ -743,20 +737,20 @@ class tools_mi():
         else: plt.scatter([x[1] for x in ch_location], [x[2] for x in ch_location], color='grey', alpha=alpha_back)
         # Exit if no channels to highlight
         if not ch_list: 
-            return None
-        else: 
-            # Highlight and optionally label specified channels
-            for i,ch in enumerate(ch_list): 
-                y = [[x[1],x[2]] for x in ch_location if x[0]==ch][0]
-                if type(color)==list and len(color)>1: 
-                    if ax: ax.scatter(y[0], y[1], color=color[i], alpha=alpha)
-                    else: plt.scatter(y[0], y[1], color=color[i], alpha=alpha)
-                else: 
-                    if ax: ax.scatter(y[0], y[1], color=color, alpha=alpha)
-                    else: plt.scatter(y[0], y[1], color=color, alpha=alpha)
-                if label: 
-                    if ax: ax.text(y[0], y[1], ch)
-                    else: plt.text(y[0], y[1], ch)
+            ch_list = [ch[0] for ch in ch_location]
+         
+        # Highlight and optionally label specified channels
+        for i,ch in enumerate(ch_list): 
+            y = [[x[1],x[2]] for x in ch_location if x[0]==ch][0]
+            if type(color)==list and len(color)>1: 
+                if ax: ax.scatter(y[0], y[1], color=color[i], alpha=alpha)
+                else: plt.scatter(y[0], y[1], color=color[i], alpha=alpha)
+            else: 
+                if ax: ax.scatter(y[0], y[1], color=color, alpha=alpha)
+                else: plt.scatter(y[0], y[1], color=color, alpha=alpha)
+            if label: 
+                if ax: ax.text(y[0], y[1], ch)
+                else: plt.text(y[0], y[1], ch)
 
 
     def find_ch_central(self, ch_location=None, ch_list=None):
@@ -982,124 +976,6 @@ class tools_mi():
         return psd_
 
 
-    def Shuffle(self, a=None):
-        """
-        Randomly shuffles the elements of the array `a` in place and returns a reference to the shuffled array.
-        
-        Args:
-            a (numpy array): The array to be shuffled. The shuffling is performed in place, affecting the original array.
-
-        Returns:
-            numpy array: A reference to the shuffled array (note that the original array `a` is modified in place).
-        """
-        np.random.shuffle(a)
-        return a
-
-
-    def ApproxPermutationTest(self, x=None, isTreatment=None, stat=None, nSimulations=1999, plot=False):
-        """
-        One-sided two-sample approximate permutation test assuming the value of `stat(x,isTreatment)` is expected to be larger under H1 than under H0.
-
-        We call this an "approximate" permutation test because an actual exact permutation test would test *every* permutation exhaustively,
-        whereas this one approximates the same distribution by repeated random label reshuffling.
-
-        Note that permutation tests potentially suffer from the Behren's-Fisher problem: a difference-of-means permutation test will perform 
-        similarly to a naive (uncorrected) t-test in that regard. To fix this, use `BootstrapTest()` instead.
-
-        Args:
-            x: Data array.
-            isTreatment: Boolean array indicating treatment group membership.
-            stat: Test statistic function 
-            nSimulations (int): Number of random permutations for approximating the distribution.
-            plot (bool): If True, plots the histogram of the permuted statistics with the observed statistic marked.
-
-        Returns:
-            float: P-value estimating the probability of observing the given or more extreme statistic under the null hypothesis.
-
-        This method approximates the distribution of the test statistic under the null hypothesis by randomly shuffling group labels.
-        It is termed "approximate" due to relying on a subset of all possible permutations. The function calculates the observed test statistic,
-        performs `nSimulations` permutations of the treatment labels, calculates the test statistic for each permutation, and optionally plots
-        the distribution of permuted statistics with the observed value. The p-value is calculated as the proportion of permuted statistics
-        that are equal to or more extreme than the observed statistic, adjusted for continuity.
-        """
-        isTreatment = isTreatment.copy()  # Copy to avoid modifying original
-        observed = stat(x, isTreatment)  # Calculate observed statistic
-        # Perform permutations and calculate p-value
-        hist = [stat(x, self.Shuffle(isTreatment)) for _ in range(nSimulations)]
-        if plot:  # Optionally plot the distribution of permuted statistics
-            plt.hist(hist)
-            plt.axvline(observed, color='black')
-            plt.show()
-        nReached = sum(np.array(hist) >= observed)
-        return (0.5 + nReached) / (1.0 + nSimulations)
-
-
-    def BootstrapTest(self, x=None, isTreatment=None, stat=None, nSimulations=1999, nullHypothesisStatValue=0.0, plot=False):
-        """
-        Efron & Tibshirani page 215, equation (15.32)
-
-        Again this is equivalent to a one-sided two-sample test and again,
-        we assume the value of `stat(x,isTreatment)` is expected to be *larger* under H1 than under H0. However, the math ends up being
-        rearranged somewhat to perform the test, so we'll need to specify explicitly the `stat() value that we expect under the
-        null hypothesis (and we will be counting the simulation results that go *below* it---however, don't be deceived by this: the
-        situation is still the same as in the other tests, in the sense that a bigger effect still means a higher `stat()` value).
-
-        Bootstrap tests avoid the Behren's-Fisher problem that you get with permutation tests: a difference-of-means bootstrap test will perform similarly to a t-test with Welch's correction.
-
-        Args:
-            x: Data array.
-            isTreatment: Boolean array indicating treatment group membership.
-            stat: Test statistic function 
-            nSimulations (int): Number of bootstrap samples to generate.
-            nullHypothesisStatValue (float): Expected value of the test statistic under the null hypothesis.
-            plot (bool): If True, plots the histogram of the bootstrap statistics with observed and null hypothesis values marked.
-
-        Returns:
-            float: P-value estimating the probability of observing a test statistic as extreme as or more extreme than the null hypothesis value.
-        """
-        hist = [stat(self.BootstrapResample(x, isTreatment), isTreatment) for _ in range(nSimulations)]
-        if plot:  # Optionally plot the distribution of bootstrap statistics
-            plt.hist(hist)
-            plt.axvline(nullHypothesisStatValue, color='red')  # Null hypothesis value
-            plt.axvline(stat(x, isTreatment), color='black')  # Observed statistic value
-            plt.show()
-        # Calculate p-value
-        nReached = sum(np.array(hist) < nullHypothesisStatValue)
-        return (0.5 + nReached) / (1.0 + nSimulations)
-
-
-    def BootstrapResample(self, a=None, isTreatment=None):
-        """
-        Performs bootstrap resampling on the array `a`.
-
-        Args:
-            a: The array to be resampled. Can be multidimensional.
-            isTreatment: An optional boolean array indicating treatment group membership. If provided, resampling is performed separately within each group.
-
-        Returns:
-            A resampled array with the same shape as `a`. If `isTreatment` is provided, each group
-            defined by `isTreatment` is resampled independently, preserving group sizes.
-        """
-        if isTreatment is not None:
-            isTreatment = isTreatment.ravel()
-            # This part only works if a.shape[1] doesn't exist
-            #a = a.copy()
-            #ar = a.ravel()
-            # This part works for any shape of a
-            ar = a.copy()
-
-            # Resample each group separately
-            ar[isTreatment] = self.BootstrapResample(ar[isTreatment])     # note that in bootstrap resampling, the
-            ar[~isTreatment] = self.BootstrapResample(ar[~isTreatment])   # labels don't actually get scrambled
-            #return a 
-            return ar
-
-        # General case: resample the entire array
-        ind = np.random.randint(a.shape[0], size=a.shape[0])
-        #return a.flat[ ind ]
-        return a[ind]
-
-
     def convert_dB(self, X=None):
         """
         Converts power values from microvolts squared (uV²) to decibels (dB).
@@ -1133,39 +1009,6 @@ class tools_mi():
             if ylim:
                 delta = abs(ylim[1] - ylim[0]) * 0.13  # Calculate vertical position for text
                 ax.text(text_pos, ylim[1] - delta, band, horizontalalignment='center')
-
-
-    def pvalue_interval(self, p=None, N=None):
-        """
-        Calculates the confidence interval for a proportion.
-
-        Args:
-            p: Observed proportion (success rate).
-            N: Sample size.
-
-        Returns:
-            tuple: Lower bound, observed proportion, and upper bound of the 95% confidence interval for the proportion.
-        """
-        # Calculate upper and lower bounds of the 95% confidence interval
-        p_up = p + 1.96 * np.sqrt(p * (1 - p) / N)
-        p_down = p - 1.96 * np.sqrt(p * (1 - p) / N)
-        
-        # Adjust lower bound if necessary to avoid negative probability
-        if p_down <= 0: p_down = 1e-7
-        return p_down, p, p_up
-
-
-    def negP(self, p=None):
-        """
-        Calculates the negative natural logarithm of a probability.
-
-        Args:
-            p: A probability value (0 < p ≤ 1).
-
-        Returns:
-            The negative natural logarithm of the probability `p`.
-        """
-        return -np.log(p)
 
 
     def plot_topomap_L_R(self, ax=None, RAW=None, dataL=None, dataR=None, cmap='viridis', vlim=None, masks=None, mask_params=None, text_range=None, text=None):
@@ -1284,7 +1127,7 @@ class tools_mi():
 
 
 
-class SumsR2:
+class Stats:
     """
     A class for performing permutation and bootstrap tests on PSDs which are transformed into eta-square values at each electrode.
 
@@ -1296,26 +1139,46 @@ class SumsR2:
         ch_set (BCI2000Tools.Electrodes.ChannelSet): An object representing the set of channels/electrodes, from BCI2000Tools.Electrodes
         dict_symm (dict): A dictionary containing electrodes names and their symmetric about the X=0 axis in the XY plane
         isContralat (list): List of electrodes in the contralateral hemisphere. The corresponding ipsilateral electrodes are found.
-        bins (list): Indices of the bins to consider for a specific frequency band. 
+        bins (numpy array): Bins in frequency space. 
+        custom_bins (str or list): Bins to consider for a specific frequency band. 
+                                   If str: it identifies one of the target frequency bands: theta, alpha, beta
+                                   If list: Indices of the first and last bins to consider in a custom frequency band (e.g. [6,10])
         transf (str): Transformation to apply to the PSDs. 
 
     Methods:
         CalculateEtas2
+        Dummy
+        CalculateR
         CalculateR2
         Transform
         DifferenceOfSumsR2
         DifferenceOfR2
         FindSymmetric
+        Shuffle
+        ApproxPermutationTest
+        BootstrapTest
+        BootstrapResample
+        pvalue_interval
+        negP
     """
 
-    def __init__(self, ch_set=None, dict_symm=None, isContralat=None, bins=None, transf='r2'):
+    def __init__(self, ch_set=None, dict_symm=None, isContralat=None, bins=None, custom_bins=None, transf='r2'):
         self.ch_set = ch_set
         self.ch_names = np.array(self.ch_set.get_labels())
         self.dict_symm = dict_symm
         self.isContralat = isContralat
         self.bins = bins
         self.transf = transf
-        
+
+        self.theta_ticks = np.where((self.bins>=4)  & (self.bins<=7 ))[0]
+        self.alpha_ticks = np.where((self.bins>=8)  & (self.bins<=12))[0]
+        self.beta_ticks  = np.where((self.bins>=13) & (self.bins<=30))[0]
+ 
+        if custom_bins == 'theta': self.custom_ticks = self.theta_ticks
+        if custom_bins == 'alpha': self.custom_ticks = self.alpha_ticks
+        if custom_bins == 'beta' : self.custom_ticks = self.beta_ticks
+        if custom_bins not in ['theta', 'alpha', 'beta']: self.custom_ticks = np.where((self.bins>=custom_bins[0]) & (self.bins<=custom_bins[-1]))[0]
+
     def CalculateEtas2(self, x=None, isTreatment=None, signed=True):
         """
         Calculates Eta squared (η²), a measure of effect size, for comparing variances between and within groups.
@@ -1362,7 +1225,50 @@ class SumsR2:
             signs = np.where(mu1 - mu2 > 0, -1, 1)  # Determine the direction of the effect
             return eta_squared * signs  # Return signed Eta squared values
 
-    def calculateR2(self, x=None, isTreatment=None, signed=True):
+
+    def Dummy(self, y=None):
+        """
+        Converts a categorical variable to a numerical variable with a dummy trick
+
+        Args:
+            y (numpy array): Contains True or False for two classes
+
+        Returns: 
+            numpy array: Numerical variable with 0 and 1
+        """
+        return np.where(y==False, 1, 0)
+
+
+    def CalculateR(self, x=None, isTreatment=None):
+        """
+        Calculates the Pearson correlation coefficient (r) between two numerical variables.
+
+        Args:
+            x (numpy array): Continuous data with shape (trial, ch)
+            isTreatment (numpy array): A binary array where True indicates samples belonging to one group (e.g., treatment) and False to the other (e.g., control).
+
+        Returns:
+            numpy array: The Pearson correlation coefficient (r).
+        """
+        # Initialize the correlation matrix
+        r = np.zeros(x.shape[1])
+        # Transform the categorical variable into a dummy variable, with task (False) getting higher label
+        y = self.Dummy(isTreatment)
+        # Calculate the means of x (aggregate trials) and y
+        x_mean = np.mean(x, axis=0)
+        y_mean = np.mean(y)
+        # Calculate the numerator of the correlation coefficient
+        numerator = np.sum((x - x_mean) * (y - y_mean)[:, np.newaxis], axis=0)
+        # Calculate the denominator of the correlation coefficient
+        x_diff_sq = np.sum((x - x_mean) ** 2, axis=0)
+        y_diff_sq = np.sum((y - y_mean) ** 2)
+        denominator = np.sqrt(x_diff_sq * y_diff_sq)
+        # Compute the correlation coefficient
+        r = numerator / denominator
+        return r
+
+
+    def CalculateR2(self, x=None, isTreatment=None, signed=True):
         """
         Calculates the squared Pearson correlation coefficient (R^2) between a continuous
         variable and a binary categorical variable, which is used as a measure of effect size.
@@ -1377,27 +1283,8 @@ class SumsR2:
             numpy array: The squared Pearson correlation coefficient (R^2) for each channel
                          and frequency bin. This is optionally signed to reflect the direction of the association.
         """
-        # Initialize the correlation matrix
-        r = np.zeros(x.shape[1])
-        
-        # Transform the categorical variable into a dummy variable, with task (False) getting higher label
-        y = np.where(isTreatment==False, 1, 0)
-        
-        # Calculate the means of x (aggregate trials) and y
-        x_mean = np.mean(x, axis=0)
-        y_mean = np.mean(y)
-        
-        # Calculate the numerator of the correlation coefficient
-        numerator = np.sum((x - x_mean) * (y - y_mean)[:, np.newaxis], axis=0)
-        
-        # Calculate the denominator of the correlation coefficient
-        x_diff_sq = np.sum((x - x_mean) ** 2, axis=0)
-        y_diff_sq = np.sum((y - y_mean) ** 2)
-        denominator = np.sqrt(x_diff_sq * y_diff_sq)
-        
         # Compute the correlation coefficient
-        r = numerator / denominator
-        
+        r = self.CalculateR(x, isTreatment)
         # Return signed or unsigned R^2 based on the signed argument
         if signed:
             return r * abs(r)  # Signed R^2
@@ -1420,9 +1307,9 @@ class SumsR2:
                 - 'r2': Computes the squared Pearson correlation coefficient (R²) to quantify the strength of association.
         """
         if self.transf == 'eta2':
-            return self.calculateEtas2(x=x, isTreatment=isTreatment)
+            return self.CalculateEtas2(x=x, isTreatment=isTreatment)
         elif self.transf == 'r2':
-            return self.calculateR2(x=x, isTreatment=isTreatment)
+            return self.CalculateR2(x=x, isTreatment=isTreatment)
 
 
     def DifferenceOfSumsR2(self, x=None, isTreatment=None):
@@ -1438,7 +1325,7 @@ class SumsR2:
             the sum for ipsilateral electrodes, based on the specified frequency bins.
         """
         # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
-        x = np.mean(x[:, :, self.bins[0]:self.bins[-1]], axis=2)
+        x = np.mean(x[:, :, self.custom_ticks[0]:self.custom_ticks[-1]], axis=2)
         # Transform PSDs to dB
         x = 10 * np.log(x * 1e12)
         # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch) -> (ch,)
@@ -1471,7 +1358,7 @@ class SumsR2:
               contralateral, with the ipsilateral differences being directly subtracted.
         """
         # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
-        x = np.mean(x[:, :, self.bins[0]:self.bins[-1]], axis=2)
+        x = np.mean(x[:, :, self.custom_ticks[0]:self.custom_ticks[-1]], axis=2)
         # Transform PSDs to dB
         x = 10 * np.log(x * 1e12)
         # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch) -> (ch,)
@@ -1507,3 +1394,154 @@ class SumsR2:
             ch_symm.append(self.dict_symm[ch])
         # Convert symmetric channel names to indices for data analysis
         return self.ch_set.find_labels(ch_symm)
+
+
+    def Shuffle(self, a=None):
+        """
+        Randomly shuffles the elements of the array `a` in place and returns a reference to the shuffled array.
+        
+        Args:
+            a (numpy array): The array to be shuffled. The shuffling is performed in place, affecting the original array.
+
+        Returns:
+            numpy array: A reference to the shuffled array (note that the original array `a` is modified in place).
+        """
+        np.random.shuffle(a)
+        return a
+
+
+    def ApproxPermutationTest(self, x=None, isTreatment=None, stat=None, nSimulations=1999, plot=False):
+        """
+        One-sided two-sample approximate permutation test assuming the value of `stat(x,isTreatment)` is expected to be larger under H1 than under H0.
+
+        We call this an "approximate" permutation test because an actual exact permutation test would test *every* permutation exhaustively,
+        whereas this one approximates the same distribution by repeated random label reshuffling.
+
+        Note that permutation tests potentially suffer from the Behren's-Fisher problem: a difference-of-means permutation test will perform 
+        similarly to a naive (uncorrected) t-test in that regard. To fix this, use `BootstrapTest()` instead.
+
+        Args:
+            x: Data array.
+            isTreatment: Boolean array indicating treatment group membership.
+            stat: Test statistic function 
+            nSimulations (int): Number of random permutations for approximating the distribution.
+            plot (bool): If True, plots the histogram of the permuted statistics with the observed statistic marked.
+
+        Returns:
+            float: P-value estimating the probability of observing the given or more extreme statistic under the null hypothesis.
+
+        This method approximates the distribution of the test statistic under the null hypothesis by randomly shuffling group labels.
+        It is termed "approximate" due to relying on a subset of all possible permutations. The function calculates the observed test statistic,
+        performs `nSimulations` permutations of the treatment labels, calculates the test statistic for each permutation, and optionally plots
+        the distribution of permuted statistics with the observed value. The p-value is calculated as the proportion of permuted statistics
+        that are equal to or more extreme than the observed statistic, adjusted for continuity.
+        """
+        isTreatment = isTreatment.copy()  # Copy to avoid modifying original
+        observed = stat(x, isTreatment)  # Calculate observed statistic
+        # Perform permutations and calculate p-value
+        hist = [stat(x, self.Shuffle(isTreatment)) for _ in range(nSimulations)]
+        if plot:  # Optionally plot the distribution of permuted statistics
+            plt.hist(hist)
+            plt.axvline(observed, color='black')
+            plt.show()
+        nReached = sum(np.array(hist) >= observed)
+        return (0.5 + nReached) / (1.0 + nSimulations)
+
+
+    def BootstrapTest(self, x=None, isTreatment=None, stat=None, nSimulations=1999, nullHypothesisStatValue=0.0, plot=False):
+        """
+        Efron & Tibshirani page 215, equation (15.32)
+
+        Again this is equivalent to a one-sided two-sample test and again,
+        we assume the value of `stat(x,isTreatment)` is expected to be *larger* under H1 than under H0. However, the math ends up being
+        rearranged somewhat to perform the test, so we'll need to specify explicitly the `stat() value that we expect under the
+        null hypothesis (and we will be counting the simulation results that go *below* it---however, don't be deceived by this: the
+        situation is still the same as in the other tests, in the sense that a bigger effect still means a higher `stat()` value).
+
+        Bootstrap tests avoid the Behren's-Fisher problem that you get with permutation tests: a difference-of-means bootstrap test will perform similarly to a t-test with Welch's correction.
+
+        Args:
+            x: Data array.
+            isTreatment: Boolean array indicating treatment group membership.
+            stat: Test statistic function 
+            nSimulations (int): Number of bootstrap samples to generate.
+            nullHypothesisStatValue (float): Expected value of the test statistic under the null hypothesis.
+            plot (bool): If True, plots the histogram of the bootstrap statistics with observed and null hypothesis values marked.
+
+        Returns:
+            float: P-value estimating the probability of observing a test statistic as extreme as or more extreme than the null hypothesis value.
+        """
+        hist = [stat(self.BootstrapResample(x, isTreatment), isTreatment) for _ in range(nSimulations)]
+        if plot:  # Optionally plot the distribution of bootstrap statistics
+            plt.hist(hist)
+            plt.axvline(nullHypothesisStatValue, color='red')  # Null hypothesis value
+            plt.axvline(stat(x, isTreatment), color='black')  # Observed statistic value
+            plt.show()
+        # Calculate p-value
+        nReached = sum(np.array(hist) < nullHypothesisStatValue)
+        return (0.5 + nReached) / (1.0 + nSimulations)
+
+
+    def BootstrapResample(self, a=None, isTreatment=None):
+        """
+        Performs bootstrap resampling on the array `a`.
+
+        Args:
+            a: The array to be resampled. Can be multidimensional.
+            isTreatment: An optional boolean array indicating treatment group membership. If provided, resampling is performed separately within each group.
+
+        Returns:
+            A resampled array with the same shape as `a`. If `isTreatment` is provided, each group
+            defined by `isTreatment` is resampled independently, preserving group sizes.
+        """
+        if isTreatment is not None:
+            isTreatment = isTreatment.ravel()
+            # This part only works if a.shape[1] doesn't exist
+            #a = a.copy()
+            #ar = a.ravel()
+            # This part works for any shape of a
+            ar = a.copy()
+
+            # Resample each group separately
+            ar[isTreatment] = self.BootstrapResample(ar[isTreatment])     # note that in bootstrap resampling, the
+            ar[~isTreatment] = self.BootstrapResample(ar[~isTreatment])   # labels don't actually get scrambled
+            #return a 
+            return ar
+
+        # General case: resample the entire array
+        ind = np.random.randint(a.shape[0], size=a.shape[0])
+        #return a.flat[ ind ]
+        return a[ind]
+
+
+    def pvalue_interval(self, p=None, N=None):
+        """
+        Calculates the confidence interval for a proportion.
+
+        Args:
+            p: Observed proportion (success rate).
+            N: Sample size.
+
+        Returns:
+            tuple: Lower bound, observed proportion, and upper bound of the 95% confidence interval for the proportion.
+        """
+        # Calculate upper and lower bounds of the 95% confidence interval
+        p_up = p + 1.96 * np.sqrt(p * (1 - p) / N)
+        p_down = p - 1.96 * np.sqrt(p * (1 - p) / N)
+        
+        # Adjust lower bound if necessary to avoid negative probability
+        if p_down <= 0: p_down = 1e-7
+        return p_down, p, p_up
+
+
+    def negP(self, p=None):
+        """
+        Calculates the negative natural logarithm of a probability.
+
+        Args:
+            p: A probability value (0 < p ≤ 1).
+
+        Returns:
+            The negative natural logarithm of the probability `p`.
+        """
+        return -np.log(p)
