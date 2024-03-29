@@ -21,11 +21,12 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyprep.prep_pipeline import PrepPipeline, NoisyChannels
 
 import eeg_dict # Contains dictionaries and libraries for electrodes locations 
-import tools_mi as mi # Contains tools for eeg and motor imagery
+import MotorImageryTools as mi # Contains tools for eeg and motor imagery
 
 
 if __name__ == '__main__':
-    MI = mi.tools_mi()
+    EEG = mi.EEG() # Initialize EEG tools
+    PLOT = mi.Plotting() # Initialize Plotting tools
 
     clean_bool = opts.c
     file_path, file_name = os.path.split(opts.f)
@@ -42,17 +43,17 @@ if __name__ == '__main__':
     base_name, extension = os.path.splitext(file_name)
 
     # Create a folder using base name, if folder doesn't exist 
-    path_to_folder = MI.create_folder(path=file_path+'/', folder_name=base_name)
+    path_to_folder = EEG.create_folder(path=file_path+'/', folder_name=base_name)
 
 
     # Import .dat file
-    signal, states, fs, ch_names, blockSize, montage_type = MI.import_file_dat(file_path+'/', file_name)
+    signal, states, fs, ch_names, blockSize, montage_type = EEG.import_file_dat(file_path+'/', file_name)
 
     if montage_type == 'DSI_24': ch_info = 'DSI24_location.txt'
     elif montage_type == 'EGI_128': ch_info = 'EGI128_location.txt'
     elif montage_type == 'GTEC_32': ch_info = 'GTEC32_location.txt'
 
-    fileTime, nBlocks, trialsPerBlock, initialSec, stimSec, taskSec = MI.evaluate_mi_paradigm(signal=signal, states=states, fs=fs, blockSize=blockSize, verbose=True)
+    fileTime, nBlocks, trialsPerBlock, initialSec, stimSec, taskSec = EEG.evaluate_mi_paradigm(signal=signal, states=states, fs=fs, blockSize=blockSize, verbose=True)
     nSplit = 6
     rejectSec = taskSec - 9 # 1 [s]
 
@@ -66,41 +67,40 @@ if __name__ == '__main__':
         ch_set = ChannelSet(ch_info)
 
         # Bandpass filter
-        signalFilter = MI.filter_data(signal, fs, l_freq=1, h_freq=40)
+        signalFilter = EEG.filter_data(signal, fs, l_freq=1, h_freq=40)
 
         # Re-reference
         if montage_type == 'EGI_128':
             # Re-reference to mastoids
-            signalFilter, ch_set = MI.spatial_filter(sfilt='REF', 
-                                                     ch_set=ch_set, 
-                                                     signal=signalFilter, 
-                                                     flag_ch='TP9 TP10', 
-                                                     verbose=True)
+            signalFilter, ch_set = EEG.spatial_filter(sfilt='REF', 
+                                                      ch_set=ch_set, 
+                                                      signal=signalFilter, 
+                                                      flag_ch='TP9 TP10', 
+                                                      verbose=True)
 
         # Create RAW
-        RAW = MI.make_RAW(signalFilter * 1e-6, fs, ch_set.get_labels())
+        RAW = EEG.make_RAW(signalFilter * 1e-6, fs, ch_set.get_labels())
         # Create montage based on channels to show
-        montage = MI.make_montage(montage_type=montage_type, 
-                                  ch_to_show=ch_set.get_labels(), 
-                                  conv_dict=eeg_dict.stand1020_to_egi)
+        montage = EEG.make_montage(montage_type=montage_type, 
+                                   ch_to_show=ch_set.get_labels(), 
+                                   conv_dict=eeg_dict.stand1020_to_egi)
         
         # Assign montage to RAW
         RAW.set_montage(montage)
 
         # Run PREP for bad channels
-        MI.make_PREP(RAW, isSNR=True, isDeviation=True, isHfNoise=True, isNanFlat=True, isRansac=True)
+        EEG.make_PREP(RAW, isSNR=True, isDeviation=True, isHfNoise=True, isNanFlat=True, isRansac=True)
 
         # Mark BAD regions
-        MI.mark_BAD_region(RAW, block=True)
-
+        EEG.mark_BAD_region(RAW, block=True)
         # Summary of BAD regions (confirm the marking)
-        MI.evaluate_BAD_region(RAW, max_duration=fileTime)
+        EEG.evaluate_BAD_region(RAW, max_duration=fileTime)
 
         # Add Stim to RAW
-        MI.make_RAW_stim(RAW, states)
+        EEG.make_RAW_stim(RAW, states)
 
         # Create annotations
-        RAW = MI.make_annotation_MI(RAW, fs,
+        RAW = EEG.make_annotation_MI(RAW, fs,
                                     nBlocks=nBlocks,
                                     trialsPerBlock=trialsPerBlock,
                                     initialSec=initialSec,
@@ -110,17 +110,12 @@ if __name__ == '__main__':
                                     nSplit=nSplit,
                                     fileTime=fileTime)
 
-        # Summary of any region
-        #MI.evaluate_BAD_region(RAW, 'BAD_region')
-        #MI.evaluate_BAD_region(RAW, 'left_1')
-
-
         # Here we can save RAW as .fif
-        MI.save_RAW(RAW=RAW, path=file_path+'/', file_name=base_name, label='')
+        EEG.save_RAW(RAW=RAW, path=file_path+'/', file_name=base_name, label='')
 
     else: # if clean_bool: 
         # Here we can import a previously saved .fif file
-        RAW, montage, fs = MI.import_file_fif(path=file_path+'/', file_name=base_name + '.fif')
+        RAW, montage, fs = EEG.import_file_fif(path=file_path+'/', file_name=base_name + '.fif')
         ch_set = ChannelSet(RAW.info['ch_names'][:RAW.get_data(picks='eeg').shape[0]])
         # This is manually added here cause when you import a RAW .fif file it doesn't know the location of all EGI channels, it's inconvenient
         if montage_type=='EGI_128':
@@ -134,37 +129,43 @@ if __name__ == '__main__':
     # Interpolate BAD channels
     old_ch_bads = RAW.info['bads']
     if not RAW.info['bads'] == []:
-        old_ch_bads = MI.interpolate(RAW)
+        old_ch_bads = EEG.interpolate(RAW)
+        # Is any channel bad after interpolation? 
+        EEG.make_PREP(RAW, isSNR=True, isDeviation=True, isHfNoise=True, isNanFlat=True, isRansac=True)
 
+    #RAW.plot()
+
+    # Summary of any region
+    #EEG.evaluate_BAD_region(RAW, 'BAD_region')
+    #EEG.evaluate_BAD_region(RAW, 'left_1')
 
     # Spatial filter with exclusion
-    signalSLAP, ch_setSLAP = MI.spatial_filter(sfilt = 'SLAP', 
-                                               ch_set = ch_set, 
-                                               signal = RAW.get_data(picks='eeg'), 
+    signalSLAP, ch_setSLAP = EEG.spatial_filter(sfilt  = 'SLAP', 
+                                               ch_set  = ch_set, 
+                                               signal  = RAW.get_data(picks='eeg'), 
                                                flag_ch = eeg_dict.ch_face + eeg_dict.ch_forehead, 
                                                verbose = True)
 
     # Create RAW after spatial filter
-    RAW_SL = MI.make_RAW(signal=signalSLAP, fs=RAW.info['sfreq'], ch_names=ch_setSLAP.get_labels())
+    RAW_SL = EEG.make_RAW(signal=signalSLAP, fs=RAW.info['sfreq'], ch_names=ch_setSLAP.get_labels())
     # Create montage based on channels to show
-    montage = MI.make_montage(montage_type=montage_type, 
-                                  ch_to_show=ch_setSLAP.get_labels(), 
-                                  conv_dict=eeg_dict.stand1020_to_egi)
+    montage = EEG.make_montage(montage_type=montage_type, 
+                               ch_to_show=ch_setSLAP.get_labels(), 
+                               conv_dict=eeg_dict.stand1020_to_egi)
     # Assign montage to RAW_SL
     RAW_SL.set_montage(montage)
 
     # Add Stim to RAW_SL
-    MI.make_RAW_stim(RAW_SL, states)
+    EEG.make_RAW_stim(RAW_SL, states)
 
     # Import annotations
     RAW_SL.set_annotations(RAW.annotations)
     #RAW_SL.plot()
 
-
     # Create Epochs and PSDs
     events_from_annot, event_dict = mne.events_from_annotations(RAW_SL)
 
-    def epochs_to_psd(RAW=None, fs=None, event_dict=None, label=None, events_from_annot=None, tmin=None, tmax=None, twindow=None, fmin=None, fmax=None, resolution=None, secPerSegment=None, secOverlap=None, nSkip=[]):
+    def epochs_to_psd(RAW=None, fs=None, event_dict=None, label=None, events_from_annot=None, tmin=None, tmax=None, fmin=None, fmax=None, resolution=None, secPerSegment=None, secOverlap=None, nSkip=[]):
         """
         Generate epochs and psds based on pre-generated annotations
 
@@ -176,7 +177,6 @@ if __name__ == '__main__':
             events_from_annot (numpy ndarray): Array containing [duration in samples, /, event id] for all annotations.
             tmin (float): Initial time of an epoch in seconds.
             tmax (float): Final time of an epoch in seconds. tmax - tmin = Length of an epoch in seconds.
-            twindow (float): Length of window to be split into epochs in seconds. 
             fmin (float): Min frequency to be considered in PSDs.
             fmax (float): Max frequency to be consdiered in PSDs.
             resolution (float): Bin width in frequency space. 
@@ -193,20 +193,20 @@ if __name__ == '__main__':
             if i not in nSkip: 
                 try:
                     # Generate Epochs
-                    epochs_ = MI.make_epochs(RAW, 
-                                             tmin=tmin, 
-                                             tmax=tmax,  
-                                             event_id=event_dict[label+f'{i}'], 
-                                             events_from_annot=events_from_annot, verbose=False)
+                    epochs_ = EEG.make_epochs(RAW, 
+                                              tmin=tmin, 
+                                              tmax=tmax,  
+                                              event_id=event_dict[label+f'{i}'], 
+                                              events_from_annot=events_from_annot, verbose=False)
 
                     # Generate PSDs
-                    psds_.append(MI.make_psd(epochs_, fs=fs, 
-                                             resolution=resolution, 
-                                             tmin=tmin, tmax=tmax, 
-                                             fmin=fmin, fmax=fmax, 
-                                             nPerSegment=int(secPerSegment * fs), 
-                                             nOverlap=int(secOverlap * fs), 
-                                             aggregate=True, verbose=False))
+                    psds_.append(EEG.make_psd(epochs_, fs=fs, 
+                                              resolution=resolution, 
+                                              tmin=tmin, tmax=tmax, 
+                                              fmin=fmin, fmax=fmax, 
+                                              nPerSegment=int(secPerSegment * fs), 
+                                              nOverlap=int(secOverlap * fs), 
+                                              aggregate=True, verbose=False))
                 except KeyError:
                     # Print label of Epoch if not found, PSDs also will not exist
                     print(f'{label}{i} not found')
@@ -217,38 +217,62 @@ if __name__ == '__main__':
 
     # Generate PSDs for each type of trial
     nSkip = []
-    psds_left = epochs_to_psd(RAW_SL, fs, event_dict, 'left_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=secPerSegment, secOverlap=secOverlap, nSkip=nSkip)
-    psds_left_rest = epochs_to_psd(RAW_SL, fs, event_dict, 'left_rest_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=secPerSegment, secOverlap=secOverlap, nSkip=nSkip)
-    psds_right = epochs_to_psd(RAW_SL, fs, event_dict, 'right_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=secPerSegment, secOverlap=secOverlap, nSkip=nSkip)
-    psds_right_rest = epochs_to_psd(RAW_SL, fs, event_dict, 'right_rest_', events_from_annot, tmin=tmin, tmax=tmax, twindow=twindow, fmin=fmin, fmax=fmax, resolution=resolution, secPerSegment=secPerSegment, secOverlap=secOverlap, nSkip=nSkip)
+    psds_left = epochs_to_psd(RAW_SL, fs, event_dict, 'left_', events_from_annot, 
+                              tmin=tmin, tmax=tmax,
+                              fmin=fmin, fmax=fmax, resolution=resolution, 
+                              secPerSegment=secPerSegment, secOverlap=secOverlap, 
+                              nSkip=nSkip)
 
-    # Identify Left vs Right electrodes based on montage
-    isLeft_ch = [x for x in MI.find_ch_circle(ch_location, radius=0.74) if x in MI.find_ch_left(ch_location)]
-    isRight_ch = [x for x in MI.find_ch_circle(ch_location, radius=0.74) if x in MI.find_ch_right(ch_location)]
+    psds_left_rest = epochs_to_psd(RAW_SL, fs, event_dict, 'left_rest_', events_from_annot, 
+                                   tmin=tmin, tmax=tmax,
+                                   fmin=fmin, fmax=fmax, resolution=resolution, 
+                                   secPerSegment=secPerSegment, secOverlap=secOverlap, 
+                                   nSkip=nSkip)
 
-    # Identify Left vs Right electrodes based on montage
-    isLeft = np.array([True if x in isLeft_ch else False for x in ch_setSLAP.get_labels()])
-    isRight = np.array([True if x in isRight_ch else False for x in ch_setSLAP.get_labels()])
+    psds_right = epochs_to_psd(RAW_SL, fs, event_dict, 'right_', events_from_annot, 
+                               tmin=tmin, tmax=tmax,
+                               fmin=fmin, fmax=fmax, resolution=resolution, 
+                               secPerSegment=secPerSegment, secOverlap=secOverlap, 
+                               nSkip=nSkip)
+
+    psds_right_rest = epochs_to_psd(RAW_SL, fs, event_dict, 'right_rest_', events_from_annot, 
+                                    tmin=tmin, tmax=tmax,
+                                    fmin=fmin, fmax=fmax, resolution=resolution, 
+                                    secPerSegment=secPerSegment, secOverlap=secOverlap, 
+                                    nSkip=nSkip)
+
+    # Find all channels on the left and right hemispheres
+    isLeft_ch =  [x for x in eeg_dict.ch_central + eeg_dict.ch_parietal if x in EEG.find_ch_left(eeg_dict.ch_location) ]
+    isRight_ch = [x for x in eeg_dict.ch_central + eeg_dict.ch_parietal if x in EEG.find_ch_right(eeg_dict.ch_location)]
+
+    # Convert ch_set channels into an array of True of False based on the ones to consider 
+    isLeft =  np.array([True if x in isLeft_ch  else False for x in EEG.low(ch_setSLAP.get_labels())])
+    isRight = np.array([True if x in isRight_ch else False for x in EEG.low(ch_setSLAP.get_labels())])
 
     # Plot target electrodes
-    fig = plt.figure(figsize=(8, 4))
-    plt.subplot(121)
-    left_labels = [x for x, y in zip(ch_setSLAP.get_labels(), isLeft) if y == True]
-    MI.show_electrode(ch_location, left_labels, True, 'red')
-    plt.subplot(122)
-    right_labels = [x for x, y in zip(ch_setSLAP.get_labels(), isRight) if y == True]
-    MI.show_electrode(ch_location, right_labels, True, 'blue')
+    plt.figure(figsize=(6,4))
+    PLOT.show_electrode(eeg_dict.ch_location, EEG.low(list(np.array(ch_setSLAP.get_labels()))), 
+                        label=False, color='grey',   alpha_back=0)
+    PLOT.show_electrode(eeg_dict.ch_location, EEG.low(list(np.array(ch_setSLAP.get_labels())[isLeft])), 
+                        label=True, color='blue',    alpha_back=0)
+
+    PLOT.show_electrode(eeg_dict.ch_location, EEG.low(list(np.array(ch_setSLAP.get_labels())[isRight])), 
+                        label=True, color='magenta', alpha_back=0)
+    lim = 1.5
+    plt.xlim(-lim, lim)
+    plt.ylim(-lim, lim)
+    plt.xticks([])
     plt.yticks([])
-    plt.subplots_adjust(wspace=0)  # Remove space between plots
+    plt.text(-lim*0.95, lim*1.05, f'Montage', weight='bold')
+    split_text = montage_type.split('_')
+    plt.text(-lim*0.65, lim*1.05, f'{split_text[0]} {split_text[1]} Channels')
     plt.savefig(f'{path_to_folder}/target_electrodes.png')
     plt.savefig(f'{path_to_folder}/target_electrodes.pdf')
     plt.show()
 
+
     # Generate frequency bins in each frequency band
     bins_ticks = np.arange(fmin, fmax+1, int(resolution))
-    theta_ticks = np.where((bins_ticks>=4) & (bins_ticks<=7))[0]
-    alpha_ticks = np.where((bins_ticks>=8) & (bins_ticks<=12))[0]
-    beta_ticks = np.where((bins_ticks>=13) & (bins_ticks<=30))[0]
 
     # Initialize useful things for the statistical test
     N = 1999
@@ -265,13 +289,13 @@ if __name__ == '__main__':
     isTreatment = np.arange(x.shape[0]) < psds_left_rest.shape[0]
 
     # Theta frequency band
-    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=theta_ticks)
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=bins_ticks, custom_bins='theta')
     if perm_bool:
-        p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
         p_left.append(p)
         labels.append(r'4-7 Hz (P)')
     if boot_bool:
-        p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_left.append(p)
         labels.append(r'4-7 Hz (B)')
         
@@ -279,13 +303,13 @@ if __name__ == '__main__':
     
 
     # Alpha frequency band
-    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=alpha_ticks)
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=bins_ticks, custom_bins='alpha')
     if perm_bool:
-        p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
         p_left.append(p)
         labels.append(r'8-12 Hz (P)')
     if boot_bool:
-        p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_left.append(p)
         labels.append(r'8-12 Hz (B)')
 
@@ -293,13 +317,13 @@ if __name__ == '__main__':
     
 
     # Beta frequency band
-    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=beta_ticks)
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=bins_ticks, custom_bins='beta')
     if perm_bool:
-        p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
         p_left.append(p)
         labels.append(r'13-30 Hz (P)')
     if boot_bool:
-        p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_left.append(p)
         labels.append(r'13-30 Hz (B)')
 
@@ -312,36 +336,36 @@ if __name__ == '__main__':
     isTreatment = np.arange(x.shape[0]) < psds_right_rest.shape[0]
 
     # Theta frequency band
-    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=theta_ticks)
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=bins_ticks, custom_bins='theta')
     if perm_bool:
-        p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
         p_right.append(p)
     if boot_bool:
-        p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_right.append(p)
 
     r2_right_theta = T.DifferenceOfR2(x, isTreatment)
 
 
     # Alpha frequency band
-    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=alpha_ticks)
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=bins_ticks, custom_bins='alpha')
     if perm_bool:
-        p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
         p_right.append(p)
     if boot_bool:
-        p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_right.append(p)
         
     r2_right_alpha = T.DifferenceOfR2(x, isTreatment)
 
 
     # Beta frequency band
-    T = mi.SumsR2(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=beta_ticks)
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=bins_ticks, custom_bins='beta')
     if perm_bool:
-        p = MI.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
         p_right.append(p)
     if boot_bool:
-        p = MI.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
         p_right.append(p)
 
     r2_right_beta = T.DifferenceOfR2(x, isTreatment)
@@ -361,10 +385,10 @@ if __name__ == '__main__':
     xUp_values = []
     xDown_values = []
     for p in p_left:
-        p_down, p, p_up = MI.pvalue_interval(p, N+1)
-        xUp_values.append(MI.negP(p_up))
-        x_values.append(MI.negP(p))
-        xDown_values.append(MI.negP(p_down))
+        p_down, p, p_up = STAT.pvalue_interval(p, N+1)
+        xUp_values.append(STAT.negP(p_up))
+        x_values.append(STAT.negP(p))
+        xDown_values.append(STAT.negP(p_down))
     #---------
     ax1.set_title('Open/Close Left')
     ax1.scatter(x_values, y, color='red', marker='.')
@@ -376,8 +400,8 @@ if __name__ == '__main__':
     ax1.set_xlim(ax1.get_xlim()[::-1])  # Reverse the x-axis for left plot
     ax1.set_xlim(right=0, left=8)
     ax1.set_ylim(y_min, y_max)
-    ax1.axvline(MI.negP(0.05), color='black', lw=1, ls='--', alpha=0.5, label='95% C.L.')
-    ax1.axvline(MI.negP(0.01), color='cornflowerblue', lw=1, ls='--', alpha=0.5, label='99% C.L.')
+    ax1.axvline(STAT.negP(0.05), color='black', lw=1, ls='--', alpha=0.5, label='95% C.L.')
+    ax1.axvline(STAT.negP(0.01), color='cornflowerblue', lw=1, ls='--', alpha=0.5, label='99% C.L.')
     ax1.set_yticks(y)
     ax1.set_yticklabels(labels)
     ax1.legend(loc='upper left')
@@ -387,10 +411,10 @@ if __name__ == '__main__':
     xUp_values = []
     xDown_values = []
     for p in p_right:
-        p_down, p, p_up = MI.pvalue_interval(p, N+1)
-        xUp_values.append(MI.negP(p_up))
-        x_values.append(MI.negP(p))
-        xDown_values.append(MI.negP(p_down))
+        p_down, p, p_up = STAT.pvalue_interval(p, N+1)
+        xUp_values.append(STAT.negP(p_up))
+        x_values.append(STAT.negP(p))
+        xDown_values.append(STAT.negP(p_down))
     #---------
     ax2.set_title('Open/Close Right')
     ax2.scatter(x_values, y, color='blue', marker='.')
@@ -401,8 +425,8 @@ if __name__ == '__main__':
     ax2.set_xlabel(r'-log($p$)')
     ax2.set_xlim(left=0, right=8)
     ax1.set_ylim(y_min, y_max)
-    ax2.axvline(MI.negP(0.05), color='black', lw=1, ls='--', alpha=0.5)
-    ax2.axvline(MI.negP(0.01), color='cornflowerblue', lw=1, ls='--', alpha=0.5)
+    ax2.axvline(STAT.negP(0.05), color='black', lw=1, ls='--', alpha=0.5)
+    ax2.axvline(STAT.negP(0.01), color='cornflowerblue', lw=1, ls='--', alpha=0.5)
     #--------- 
     plt.subplots_adjust(wspace=0)  # Adjust space between subplots
     plt.savefig(f'{path_to_folder}/pVal_atRes_{resolution}_Hz.png')
@@ -421,13 +445,13 @@ if __name__ == '__main__':
     # Plot
     fig, axes = plt.subplots(nrows=3, ncols=3, figsize=(6, 6))
     # Make colormap for topoplots
-    custom_cmap = MI.make_simple_cmap('blue', 'white', 'red')
+    custom_cmap = PLOT.make_simple_cmap('blue', 'white', 'red')
     # Plot topoplots - Theta
-    MI.plot_topomap_L_R([axes[0,0],axes[0,1],axes[0,2]], RAW_SL, r2_left_theta, r2_right_theta, custom_cmap, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '4-7 Hz', True)
+    PLOT.plot_topomap_L_R([axes[0,0],axes[0,1],axes[0,2]], RAW_SL, r2_left_theta, r2_right_theta, custom_cmap, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '4-7 Hz', True)
     # Plot topoplots - Alpha
-    MI.plot_topomap_L_R([axes[1,0],axes[1,1],axes[1,2]], RAW_SL, r2_left_alpha, r2_right_alpha, custom_cmap, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '8-12 Hz', False)
+    PLOT.plot_topomap_L_R([axes[1,0],axes[1,1],axes[1,2]], RAW_SL, r2_left_alpha, r2_right_alpha, custom_cmap, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '8-12 Hz', False)
     # Plot topoplots - Beta
-    MI.plot_topomap_L_R([axes[2,0],axes[2,1],axes[2,2]], RAW_SL, r2_left_beta, r2_right_beta, custom_cmap, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '13-30 Hz', False)
+    PLOT.plot_topomap_L_R([axes[2,0],axes[2,1],axes[2,2]], RAW_SL, r2_left_beta, r2_right_beta, custom_cmap, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '13-30 Hz', False)
     fig.tight_layout()
     plt.savefig(f'{path_to_folder}/topoR2_atRes_{resolution}_Hz.png')
     plt.savefig(f'{path_to_folder}/topoR2_atRes_{resolution}_Hz.pdf')
