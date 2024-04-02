@@ -1012,9 +1012,11 @@ class Stats:
         self.bins = bins
         self.transf = transf
 
-        self.theta_ticks = np.where((self.bins>=4)  & (self.bins<=7 ))[0]
-        self.alpha_ticks = np.where((self.bins>=8)  & (self.bins<=12))[0]
-        self.beta_ticks  = np.where((self.bins>=13) & (self.bins<=30))[0]
+        self.delta_ticks  = np.where((self.bins>=1)  & (self.bins< 4 ))[0]
+        self.theta_ticks  = np.where((self.bins>=4)  & (self.bins< 8 ))[0]
+        self.alpha_ticks  = np.where((self.bins>=8)  & (self.bins<=12))[0]
+        self.beta_ticks   = np.where((self.bins>12)  & (self.bins<=30))[0]
+        self.gamma_ticks  = np.where((self.bins>30)  & (self.bins<=50))[0]
  
         if custom_bins == 'theta': self.custom_ticks = self.theta_ticks
         if custom_bins == 'alpha': self.custom_ticks = self.alpha_ticks
@@ -1078,7 +1080,7 @@ class Stats:
         Returns: 
             numpy array: Numerical variable with 0 and 1
         """
-        return np.where(y==False, 1, 0)
+        return np.where(y==False, 0, 1)
 
 
     def CalculateR(self, x=None, isTreatment=None):
@@ -1231,7 +1233,7 @@ class Stats:
         """
         ch_symm = []
         # Iterate over target electrodes to find their symmetric counterparts
-        for ch in self.ch_names[isContralat]:
+        for ch in [x.lower() for x in self.ch_names[isContralat]]:
             # Append the symmetric channel name based on predefined mapping
             ch_symm.append(self.dict_symm[ch])
         # Convert symmetric channel names to indices for data analysis
@@ -1426,10 +1428,39 @@ class Plotting():
         show_electrode
         plot_frequency_bands
         plot_topomap_L_R
+        make_cmap
+        make_simple_cmap
     """
 
     def __init__(self):
-        pass
+        # Define the colormap dictionary
+        kelvin_i = {
+            'red': (
+                (0.000, 0.0, 0.0),
+                (0.350, 0.0, 0.0),
+                (0.500, 1.0, 1.0),
+                (0.890, 1.0, 1.0),
+                (1.000, 0.5, 0.5),
+            ),
+            'green': (
+                (0.000, 0.0, 0.0),
+                (0.125, 0.0, 0.0),
+                (0.375, 1.0, 1.0),
+                (0.640, 1.0, 1.0),
+                (0.910, 0.0, 0.0),
+                (1.000, 0.0, 0.0),
+            ),
+            'blue': (
+                (0.000, 0.5, 0.5),
+                (0.110, 1.0, 1.0),
+                (0.500, 1.0, 1.0),
+                (0.650, 0.0, 0.0),
+                (1.000, 0.0, 0.0),
+            ),
+        }
+        # Create and register the custom colormap
+        self.kelvin_i_cmap = self.make_cmap(kelvin_i, 'kelvin_i', 256)
+        self.simple_cmap = self.make_simple_cmap(c1='blue', c2='white', c3='red')
 
 
     def show_electrode(self, ch_location=None, ch_list=None, label=False, color='red', alpha=1, ax=None, alpha_back=0.5):
@@ -1469,16 +1500,17 @@ class Plotting():
                 else: plt.text(y[0], y[1], ch)
 
 
-    def plot_frequency_bands(self, ax=None, ylim=None):
+    def plot_frequency_bands(self, ax=None, ylim=None, fontsize=12):
         """
         Adds frequency band annotations to a plot.
 
         Args:
-            ax: Matplotlib axis object to which the frequency band lines and labels are added.
-            ylim: Tuple of (ymin, ymax) specifying the vertical limits of the plot. Used to position text labels.
+            ax (matplotlib.axes.Axes): Axis containing the plot. This is optional.
+            ylim (list of tuple): Tuple of (ymin, ymax) specifying the vertical limits of the plot. Used to position text labels.
+            fontsize (int): Size of the font for the frequency bands.
         """
         # Frequency band annotations with their upper limit and label position
-        bands = {r'$\delta$': [4, 2], r'$\theta$': [8, 5.5], r'$\alpha$': [13, 10], r'$\beta$': [32, 21], r'$\gamma$': [50, 35]}
+        bands = {r'$\delta$': [4, 2.5], r'$\theta$': [8, 6], r'$\alpha$': [12, 10], r'$\beta$': [30, 21], r'$\gamma$': [50, 35]}
         for band, [freq, text_pos] in bands.items():
             # Draw vertical line for each band
             if ax: ax.axvline(x=freq, color='grey', linestyle='--', linewidth=1, alpha=0.5)
@@ -1486,8 +1518,8 @@ class Plotting():
             # Place text label if ylim is provided
             if ylim:
                 delta = abs(ylim[1] - ylim[0]) * 0.13  # Calculate vertical position for text
-                if ax: ax.text(text_pos, ylim[1] - delta, band, horizontalalignment='center')
-                else: plt.text(text_pos, ylim[1] - delta, band, horizontalalignment='center')
+                if ax: ax.text(text_pos, ylim[1] - delta, band, horizontalalignment='center', fontsize=fontsize)
+                else: plt.text(text_pos, ylim[1] - delta, band, horizontalalignment='center', fontsize=fontsize)
 
 
     def plot_topomap_L_R(self, ax=None, RAW=None, dataL=None, dataR=None, cmap='viridis', vlim=None, masks=None, mask_params=None, text_range=None, text=None):
@@ -1555,34 +1587,6 @@ class Plotting():
                 print(f"Failed to register colormap '{name}'. Error: {str(e)}")
         """
         return cmap
-
-    # Define the colormap dictionary
-    kelvin_i = {
-        'red': (
-            (0.000, 0.0, 0.0),
-            (0.350, 0.0, 0.0),
-            (0.500, 1.0, 1.0),
-            (0.890, 1.0, 1.0),
-            (1.000, 0.5, 0.5),
-        ),
-        'green': (
-            (0.000, 0.0, 0.0),
-            (0.125, 0.0, 0.0),
-            (0.375, 1.0, 1.0),
-            (0.640, 1.0, 1.0),
-            (0.910, 0.0, 0.0),
-            (1.000, 0.0, 0.0),
-        ),
-        'blue': (
-            (0.000, 0.5, 0.5),
-            (0.110, 1.0, 1.0),
-            (0.500, 1.0, 1.0),
-            (0.650, 0.0, 0.0),
-            (1.000, 0.0, 0.0),
-        ),
-    }
-    # Create and register the custom colormap
-    kelvin_i_cmap = make_cmap(kelvin_i, 'kelvin_i', 256)
 
 
     def make_simple_cmap(self, c1=None, c2=None, c3=None):
