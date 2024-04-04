@@ -45,7 +45,6 @@ if __name__ == '__main__':
     # Create a folder using base name, if folder doesn't exist 
     path_to_folder = EEG.create_folder(path=file_path+'/', folder_name=base_name)
 
-
     # Import .dat file
     signal, states, fs, ch_names, blockSize, montage_type = EEG.import_file_dat(file_path+'/', file_name)
 
@@ -66,6 +65,27 @@ if __name__ == '__main__':
         # Define initial ChannelSet
         ch_set = ChannelSet(ch_info)
 
+        plt.figure(figsize=(4.5,4.5))
+        ch_set.plot()
+        plt.text(-1, 1.05, f'Montage', weight='bold')
+        split_text = montage_type.split('_')
+        plt.text(-1, 0.95, f'{split_text[0]} {split_text[1]} Channels')
+        # Save the plot
+        plt.savefig(f'{path_to_folder}/montage.png')
+        plt.savefig(f'{path_to_folder}/montage.pdf')
+        plt.show()
+
+
+        # Run PREP the first time
+        RAW = EEG.make_RAW_with_montage(signal=signal * 1e-6, 
+                                        fs=fs, 
+                                        ch_names=ch_set.get_labels(), 
+                                        montage_type=montage_type, 
+                                        conv_dict=eeg_dict.stand1020_to_egi)
+
+        # Run PREP for bad channels
+        EEG.make_PREP(RAW, isSNR=True, isDeviation=True, isHfNoise=True, isNanFlat=True, isRansac=True)
+
         # Bandpass filter
         signalFilter = EEG.filter_data(signal, fs, l_freq=1, h_freq=40)
 
@@ -78,18 +98,12 @@ if __name__ == '__main__':
                                                       flag_ch='TP9 TP10', 
                                                       verbose=True)
 
-        # Create RAW
-        RAW = EEG.make_RAW(signalFilter * 1e-6, fs, ch_set.get_labels())
-        # Create montage based on channels to show
-        montage = EEG.make_montage(montage_type=montage_type, 
-                                   ch_to_show=ch_set.get_labels(), 
-                                   conv_dict=eeg_dict.stand1020_to_egi)
-        
-        # Assign montage to RAW
-        RAW.set_montage(montage)
-
-        # Run PREP for bad channels
-        EEG.make_PREP(RAW, isSNR=True, isDeviation=True, isHfNoise=True, isNanFlat=True, isRansac=True)
+        # Create RAW with montage
+        RAW = EEG.make_RAW_with_montage(signal=signalFilter * 1e-6, 
+                                        fs=fs, 
+                                        ch_names=ch_set.get_labels(), 
+                                        montage_type=montage_type, 
+                                        conv_dict=eeg_dict.stand1020_to_egi)
 
         # Mark BAD regions
         EEG.mark_BAD_region(RAW, block=True)
@@ -132,6 +146,8 @@ if __name__ == '__main__':
         old_ch_bads = EEG.interpolate(RAW)
         # Is any channel bad after interpolation? 
         EEG.make_PREP(RAW, isSNR=True, isDeviation=True, isHfNoise=True, isNanFlat=True, isRansac=True)
+        print(f"Currently bad channels: {RAW.info['bads']}")
+        print(f'Old bad channels: {old_ch_bads}')
 
     #RAW.plot()
 
@@ -141,19 +157,17 @@ if __name__ == '__main__':
 
     # Spatial filter with exclusion
     signalSLAP, ch_setSLAP = EEG.spatial_filter(sfilt  = 'SLAP', 
-                                               ch_set  = ch_set, 
-                                               signal  = RAW.get_data(picks='eeg'), 
-                                               flag_ch = eeg_dict.ch_face + eeg_dict.ch_forehead, 
-                                               verbose = True)
+                                                ch_set  = ch_set, 
+                                                signal  = RAW.get_data(picks='eeg'), 
+                                                flag_ch = eeg_dict.ch_face + eeg_dict.ch_forehead, 
+                                                verbose = True)
 
-    # Create RAW after spatial filter
-    RAW_SL = EEG.make_RAW(signal=signalSLAP, fs=RAW.info['sfreq'], ch_names=ch_setSLAP.get_labels())
-    # Create montage based on channels to show
-    montage = EEG.make_montage(montage_type=montage_type, 
-                               ch_to_show=ch_setSLAP.get_labels(), 
-                               conv_dict=eeg_dict.stand1020_to_egi)
-    # Assign montage to RAW_SL
-    RAW_SL.set_montage(montage)
+    # Create RAW after spatial filter (RAW_SL)
+    RAW_SL = EEG.make_RAW_with_montage(signal=signalSLAP, 
+                                       fs=fs, 
+                                       ch_names=ch_setSLAP.get_labels(), 
+                                       montage_type=montage_type, 
+                                       conv_dict=eeg_dict.stand1020_to_egi)
 
     # Add Stim to RAW_SL
     EEG.make_RAW_stim(RAW_SL, states)
@@ -249,8 +263,8 @@ if __name__ == '__main__':
     isLeft =  np.array([True if x in isLeft_ch  else False for x in EEG.low(ch_setSLAP.get_labels())])
     isRight = np.array([True if x in isRight_ch else False for x in EEG.low(ch_setSLAP.get_labels())])
 
-    # Plot target electrodes
-    plt.figure(figsize=(6,4))
+    # Plot the electrodes used in the statistical tests
+    plt.figure(figsize=(6,6))
     PLOT.show_electrode(eeg_dict.ch_location, EEG.low(list(np.array(ch_setSLAP.get_labels()))), 
                         label=False, color='grey',   alpha_back=0)
     PLOT.show_electrode(eeg_dict.ch_location, EEG.low(list(np.array(ch_setSLAP.get_labels())[isLeft])), 
@@ -260,115 +274,141 @@ if __name__ == '__main__':
                         label=True, color='magenta', alpha_back=0)
     lim = 1.5
     plt.xlim(-lim, lim)
-    plt.ylim(-lim, lim)
+    plt.ylim(-1.05, 1.05)
     plt.xticks([])
     plt.yticks([])
-    plt.text(-lim*0.95, lim*1.05, f'Montage', weight='bold')
+    plt.gca().spines['top'].set_visible(False)
+    plt.gca().spines['right'].set_visible(False)
+    plt.gca().spines['bottom'].set_visible(False)
+    plt.gca().spines['left'].set_visible(False)
+    plt.text(-lim*0.95, 1*1.05, f'Montage', weight='bold')
     split_text = montage_type.split('_')
-    plt.text(-lim*0.65, lim*1.05, f'{split_text[0]} {split_text[1]} Channels')
+    plt.text(-lim*0.65, 1*1.05, f'{split_text[0]} {split_text[1]} Channels')
+    plt.axvline(0, lw=1, ls='--', color='grey', alpha=0.25)
+    # Show the boundary of the head:
+    r0 = 1
+    theta = np.arange(0, np.pi, 0.01)
+    plt.plot(r0 * np.cos(theta), r0 * np.sin(theta), color='black', lw=1)
+    plt.plot(r0 * np.cos(theta), -r0 * np.sin(theta), color='black', lw=1)
+    # Save the plot
     plt.savefig(f'{path_to_folder}/target_electrodes.png')
     plt.savefig(f'{path_to_folder}/target_electrodes.pdf')
     plt.show()
-
 
     # Generate frequency bins in each frequency band
     bins_ticks = np.arange(fmin, fmax+1, int(resolution))
 
     # Initialize useful things for the statistical test
-    N = 1999
+    N = 2999
     perm_bool = True # Do Permutation test
     boot_bool = True # Do Bootstrap test
-    
+
     p_left = []
     p_right = []
     labels = []
 
+    plt.figure(figsize=(12,6))
     # LEFT HAND Statistical Test begins
-    x = np.vstack([psds_left_rest, psds_left])
+    x = np.vstack([psds_left_rest, psds_left]) #(trial, ch, bin)
     # Generate labels for rest (True) and task (False)
-    isTreatment = np.arange(x.shape[0]) < psds_left_rest.shape[0]
+    isTreatment = np.arange(x.shape[0]) < psds_left_rest.shape[0] #(trial,)
+    isContrast = isRight
 
     # Theta frequency band
-    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=bins_ticks, custom_bins='theta')
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContrast, bins=bins_ticks, custom_bins='theta')
+    r2_left_theta = STAT.DifferenceOfR2(x, isTreatment)
     if perm_bool:
-        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        plt.subplot(231)
+        plt.title(r'Open/Close Left', fontsize=12,weight='bold', loc='left')
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, plot=True)
         p_left.append(p)
         labels.append(r'4-7 Hz (P)')
     if boot_bool:
-        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        plt.subplot(234)
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0, plot=True)
         p_left.append(p)
         labels.append(r'4-7 Hz (B)')
-        
-    r2_left_theta = T.DifferenceOfR2(x, isTreatment)
-    
 
     # Alpha frequency band
-    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=bins_ticks, custom_bins='alpha')
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContrast, bins=bins_ticks, custom_bins='alpha')
+    r2_left_alpha = STAT.DifferenceOfR2(x, isTreatment)
     if perm_bool:
-        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        plt.subplot(232)
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, plot=True)
         p_left.append(p)
         labels.append(r'8-12 Hz (P)')
     if boot_bool:
-        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        plt.subplot(235)
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0, plot=True)
         p_left.append(p)
         labels.append(r'8-12 Hz (B)')
 
-    r2_left_alpha = T.DifferenceOfR2(x, isTreatment)
-    
-
     # Beta frequency band
-    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isRight, bins=bins_ticks, custom_bins='beta')
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContrast, bins=bins_ticks, custom_bins='beta')
+    r2_left_beta = STAT.DifferenceOfR2(x, isTreatment)
     if perm_bool:
-        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        plt.subplot(233)
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, plot=True)
         p_left.append(p)
         labels.append(r'13-30 Hz (P)')
     if boot_bool:
-        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        plt.subplot(236)
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0, plot=True)
         p_left.append(p)
         labels.append(r'13-30 Hz (B)')
+    plt.tight_layout()
+    plt.savefig(f'{path_to_folder}/test_left_{resolution}_Hz.png')
+    plt.savefig(f'{path_to_folder}/test_left_{resolution}_Hz.pdf')
+    plt.show()
 
-    r2_left_beta = T.DifferenceOfR2(x, isTreatment)
 
-
+    plt.figure(figsize=(12,6))
     # RIGHT HAND Statistical Test begins
-    x = np.vstack([psds_right_rest, psds_right])
+    x = np.vstack([psds_right_rest, psds_right]) #(trial, ch, bin)
     # Generate labels for rest (True) and task (False)
-    isTreatment = np.arange(x.shape[0]) < psds_right_rest.shape[0]
+    isTreatment = np.arange(x.shape[0]) < psds_right_rest.shape[0] #(trial,)
+    isContrast = isLeft
 
     # Theta frequency band
-    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=bins_ticks, custom_bins='theta')
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContrast, bins=bins_ticks, custom_bins='theta')
+    r2_right_theta = STAT.DifferenceOfR2(x, isTreatment)
     if perm_bool:
-        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        plt.subplot(231)
+        plt.title(r'Open/Close Right', fontsize=12, weight='bold', loc='left')
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, plot=True)
         p_right.append(p)
     if boot_bool:
-        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        plt.subplot(234)
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0, plot=True)
         p_right.append(p)
-
-    r2_right_theta = T.DifferenceOfR2(x, isTreatment)
-
 
     # Alpha frequency band
-    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=bins_ticks, custom_bins='alpha')
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContrast, bins=bins_ticks, custom_bins='alpha')
+    r2_right_alpha = STAT.DifferenceOfR2(x, isTreatment)
     if perm_bool:
-        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        plt.subplot(232)
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, plot=True)
         p_right.append(p)
     if boot_bool:
-        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        plt.subplot(235)
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0, plot=True)
         p_right.append(p)
-        
-    r2_right_alpha = T.DifferenceOfR2(x, isTreatment)
-
 
     # Beta frequency band
-    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isLeft, bins=bins_ticks, custom_bins='beta')
+    STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContrast, bins=bins_ticks, custom_bins='beta')
+    r2_right_beta = STAT.DifferenceOfR2(x, isTreatment)
     if perm_bool:
-        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N )
+        plt.subplot(233)
+        p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, plot=True)
         p_right.append(p)
     if boot_bool:
-        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=T.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0 )
+        plt.subplot(236)
+        p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=N, nullHypothesisStatValue=0.0, plot=True)
         p_right.append(p)
-
-    r2_right_beta = T.DifferenceOfR2(x, isTreatment)
+    plt.tight_layout()
+    plt.savefig(f'{path_to_folder}/test_right_{resolution}_Hz.png')
+    plt.savefig(f'{path_to_folder}/test_right_{resolution}_Hz.pdf')
+    plt.show()
 
 
     # Plot p-values extracted by Statistical tests
@@ -390,18 +430,18 @@ if __name__ == '__main__':
         x_values.append(STAT.negP(p))
         xDown_values.append(STAT.negP(p_down))
     #---------
-    ax1.set_title('Open/Close Left')
-    ax1.scatter(x_values, y, color='red', marker='.')
+    ax1.set_title('Open/Close Left', fontsize=12, loc='left', weight='bold')
+    ax1.scatter(x_values, y, color='red', marker='o')
     # Add confidence interval on true p
     for i in range(len(y)):
         ax1.fill_betweenx([y[i]-deltay, y[i]+deltay], xDown_values[i], xUp_values[i], color='red', alpha=0.3)
     ax1.hlines(y, 0, x_values, colors='red', lw=1, alpha=0.25)
-    ax1.set_xlabel(r'-log($p$)')
+    ax1.set_xlabel(r'-log(p)')
     ax1.set_xlim(ax1.get_xlim()[::-1])  # Reverse the x-axis for left plot
-    ax1.set_xlim(right=0, left=8)
+    ax1.set_xlim(right=0, left=6)
     ax1.set_ylim(y_min, y_max)
-    ax1.axvline(STAT.negP(0.05), color='black', lw=1, ls='--', alpha=0.5, label='95% C.L.')
-    ax1.axvline(STAT.negP(0.01), color='cornflowerblue', lw=1, ls='--', alpha=0.5, label='99% C.L.')
+    ax1.axvline(STAT.negP(0.05), color='black', lw=1, ls=':', alpha=0.5, label='95% C.L.')
+    ax1.axvline(STAT.negP(0.01), color='darkviolet', lw=1, ls=':', alpha=0.5, label='99% C.L.')
     ax1.set_yticks(y)
     ax1.set_yticklabels(labels)
     ax1.legend(loc='upper left')
@@ -416,21 +456,21 @@ if __name__ == '__main__':
         x_values.append(STAT.negP(p))
         xDown_values.append(STAT.negP(p_down))
     #---------
-    ax2.set_title('Open/Close Right')
-    ax2.scatter(x_values, y, color='blue', marker='.')
+    ax2.set_title('Open/Close Right', fontsize=12, loc='right', weight='bold')
+    ax2.scatter(x_values, y, color='blue', marker='o')
     # Add confidence interval on true p
     for i in range(len(y)):
         ax2.fill_betweenx([y[i]-deltay, y[i]+deltay], xDown_values[i], xUp_values[i], color='blue', alpha=0.3)
     ax2.hlines(y, 0, x_values, colors='blue', lw=1, alpha=0.25)
-    ax2.set_xlabel(r'-log($p$)')
-    ax2.set_xlim(left=0, right=8)
+    ax2.set_xlabel(r'-log(p)')
+    ax2.set_xlim(left=0, right=6)
     ax1.set_ylim(y_min, y_max)
-    ax2.axvline(STAT.negP(0.05), color='black', lw=1, ls='--', alpha=0.5)
-    ax2.axvline(STAT.negP(0.01), color='cornflowerblue', lw=1, ls='--', alpha=0.5)
+    ax2.axvline(STAT.negP(0.05), color='black', lw=1, ls=':', alpha=0.5)
+    ax2.axvline(STAT.negP(0.01), color='darkviolet', lw=1, ls=':', alpha=0.5)
     #--------- 
     plt.subplots_adjust(wspace=0)  # Adjust space between subplots
-    plt.savefig(f'{path_to_folder}/pVal_atRes_{resolution}_Hz.png')
-    plt.savefig(f'{path_to_folder}/pVal_atRes_{resolution}_Hz.pdf')
+    plt.savefig(f'{path_to_folder}/pVal_{resolution}_Hz.png')
+    plt.savefig(f'{path_to_folder}/pVal_{resolution}_Hz.pdf')
     plt.show()
     
 
@@ -453,6 +493,6 @@ if __name__ == '__main__':
     # Plot topoplots - Beta
     PLOT.plot_topomap_L_R([axes[2,0],axes[2,1],axes[2,2]], RAW_SL, r2_left_beta, r2_right_beta, custom_cmap, (-1,1), [mask,mask_left,mask_right], [mask_params1,mask_params2], '13-30 Hz', False)
     fig.tight_layout()
-    plt.savefig(f'{path_to_folder}/topoR2_atRes_{resolution}_Hz.png')
-    plt.savefig(f'{path_to_folder}/topoR2_atRes_{resolution}_Hz.pdf')
+    plt.savefig(f'{path_to_folder}/topoR2_{resolution}_Hz.png')
+    plt.savefig(f'{path_to_folder}/topoR2_{resolution}_Hz.pdf')
     plt.show()

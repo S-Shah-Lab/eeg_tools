@@ -35,6 +35,7 @@ class EEG():
         spatial_filter
         find_ch_index
         make_RAW
+        make_RAW_with_montage
         make_RAW_stim
         make_PREP
         mark_BAD_region
@@ -355,6 +356,31 @@ class EEG():
         info = mne.create_info(ch_names=ch_names, sfreq=fs, ch_types="eeg")
         # Initialize Raw object with the signal and info, make sure time-series are in uV
         RAW = mne.io.RawArray(signal, info, verbose=False) # uV
+        return RAW
+
+
+    def make_RAW_with_montage(self, signal=None, fs=None, ch_names=None, montage_type=None, conv_dict=None):
+        """
+        Constructs an MNE RAW object and set a montage from signal data, sampling frequency, and channel names.
+
+        Args:
+            signal (numpy array): The EEG signal data as a 2D numpy array (channels x time points).
+            fs (float): Sampling frequency of the signal in Hz
+            ch_names (BCI2000Tools.Electrodes.ChannelSet): List of channel names corresponding to the signal rows
+            montage_type (str): The type of montage to create. Supported types  []'DSI_24', 'GTEC_32', 'EGI_128']
+            conv_dict (dict): Optional dictionary for converting channel names from the montage names to custom names.
+
+        Returns:
+            mne.io.Raw: An MNE Raw object containing the EEG data and a montage
+        """
+        # Initialize RAW object
+        RAW = self.make_RAW(signal=signal, fs=fs, ch_names=ch_names)
+        # Generate montage
+        montage = self.make_montage(montage_type=montage_type, 
+                                    ch_to_show=ch_names, 
+                                    conv_dict=conv_dict)
+        RAW.set_montage(montage)
+
         return RAW
 
 
@@ -1004,7 +1030,7 @@ class Stats:
         negP
     """
 
-    def __init__(self, ch_set=None, dict_symm=None, isContralat=None, bins=None, custom_bins=None, transf='r2'):
+    def __init__(self, ch_set=None, dict_symm=None, isContralat=None, bins=None, custom_bins=None, transf='eta2'):
         self.ch_set = ch_set
         self.ch_names = np.array(self.ch_set.get_labels())
         self.dict_symm = dict_symm
@@ -1066,7 +1092,7 @@ class Stats:
         if not signed:
             return eta_squared
         else:
-            signs = np.where(mu1 - mu2 > 0, -1, 1)  # Determine the direction of the effect
+            signs = np.where(mu1 - mu2 > 0, 1, -1)  # Determine the direction of the effect
             return eta_squared * signs  # Return signed Eta squared values
 
 
@@ -1284,12 +1310,16 @@ class Stats:
         observed = stat(x, isTreatment)  # Calculate observed statistic
         # Perform permutations and calculate p-value
         hist = [stat(x, self.Shuffle(isTreatment)) for _ in range(nSimulations)]
-        if plot:  # Optionally plot the distribution of permuted statistics
-            plt.hist(hist)
-            plt.axvline(observed, color='black')
-            plt.show()
         nReached = sum(np.array(hist) >= observed)
-        return (0.5 + nReached) / (1.0 + nSimulations)
+        # Calculate p-value
+        p = (0.5 + nReached) / (1.0 + nSimulations)
+        if plot:  # Optionally plot the distribution of permuted statistics
+            plt.hist(hist, label=f'N = {nSimulations}')
+            plt.axvline(observed, color='black', label=f'Obs: {round(observed, 3)}')
+            plt.xlabel(r'$\Delta$', loc='right')
+            plt.legend(title=f'Permutation (p = {round(p,3)})', loc='upper left', frameon=False)
+            plt.arrow(observed, 20, 0.1, 0, color='black', length_includes_head=False, head_width=20, head_length=0.05)
+        return p
 
 
     def BootstrapTest(self, x=None, isTreatment=None, stat=None, nSimulations=1999, nullHypothesisStatValue=0.0, plot=False):
@@ -1315,15 +1345,20 @@ class Stats:
         Returns:
             float: P-value estimating the probability of observing a test statistic as extreme as or more extreme than the null hypothesis value.
         """
+        observed = stat(x, isTreatment)  # Calculate observed statistic
+        # Perform bootstrap and calculate p-value
         hist = [stat(self.BootstrapResample(x, isTreatment), isTreatment) for _ in range(nSimulations)]
-        if plot:  # Optionally plot the distribution of bootstrap statistics
-            plt.hist(hist)
-            plt.axvline(nullHypothesisStatValue, color='red')  # Null hypothesis value
-            plt.axvline(stat(x, isTreatment), color='black')  # Observed statistic value
-            plt.show()
-        # Calculate p-value
         nReached = sum(np.array(hist) < nullHypothesisStatValue)
-        return (0.5 + nReached) / (1.0 + nSimulations)
+        # Calculate p-value
+        p = (0.5 + nReached) / (1.0 + nSimulations)
+        if plot:  # Optionally plot the distribution of bootstrap statistics 
+            plt.hist(hist, label=f'N = {nSimulations}', color='seagreen')
+            plt.axvline(observed, color='black', label=f'Obs: {round(observed, 3)}') # Observed statistic value
+            plt.axvline(nullHypothesisStatValue, color='red', label=f'$H_{0}$: $\Delta$ = {nullHypothesisStatValue}')  # Null hypothesis value
+            plt.xlabel(r'$\Delta$', loc='right')
+            plt.legend(title=f'Bootstrap (p = {round(p,3)})', loc='upper left', frameon=False)
+            plt.arrow(nullHypothesisStatValue, 20, -0.1, 0, color='red', length_includes_head=False, head_width=20, head_length=0.05)
+        return p
 
 
     def BootstrapResample(self, a=None, isTreatment=None):
@@ -1510,7 +1545,7 @@ class Plotting():
             fontsize (int): Size of the font for the frequency bands.
         """
         # Frequency band annotations with their upper limit and label position
-        bands = {r'$\delta$': [4, 2.5], r'$\theta$': [8, 6], r'$\alpha$': [12, 10], r'$\beta$': [30, 21], r'$\gamma$': [50, 35]}
+        bands = {r'$\delta$': [4, 2.5], r'$\theta$': [8, 6], r'$\alpha$': [13, 10.5], r'$\beta$': [31, 22], r'$\gamma$': [50, 35]}
         for band, [freq, text_pos] in bands.items():
             # Draw vertical line for each band
             if ax: ax.axvline(x=freq, color='grey', linestyle='--', linewidth=1, alpha=0.5)
