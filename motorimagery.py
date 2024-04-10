@@ -348,19 +348,23 @@ if __name__ == '__main__':
     x = np.vstack([psds_left_rest, psds_left]) #(trial, ch, bin)
     # Generate labels for rest (True) and task (False)
     isTreatment = np.arange(x.shape[0]) < psds_left_rest.shape[0] #(trial,)
-    isContrast = isRight
+    isContralat = isRight
 
-    for i in range(N):
-        STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContrast, bins=bins_ticks, custom_bins=[freq_band[i], freq_band[i+1]])
-        r2_left.append(STAT.DifferenceOfR2(x, isTreatment))
+    for i in range(len(freq_band)-1):
+        STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContralat, bins=bins_ticks, custom_bins=[freq_band[i], freq_band[i+1]])
+        # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
+        x_ = np.mean(x[:, :, STAT.custom_ticks[0] : STAT.custom_ticks[-1]], axis=2)
+        # Transform PSDs to dB
+        x_ = EEG.convert_dB(x_)
+        r2_left.append(STAT.DifferenceOfR2(x_, isTreatment))
         if perm_bool:
             if i == 0: axs[0,i].set_title(r'Open/Close Left', fontsize=12,weight='bold', loc='left')
             axs[0,i].set_title(f'[{freq_band[i]}-{freq_band[i+1]-1}] Hz', fontsize=12, loc='right')
-            p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, plot=True, ax=axs[0,i])
+            p = STAT.ApproxPermutationTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, plot=True, ax=axs[0,i])
             p_left.append(p)
             labels.append(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (P)')
         if boot_bool:
-            p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, nullHypothesisStatValue=0.0, plot=True, ax=axs[1,i])
+            p = STAT.BootstrapTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, nullHypothesisStatValue=0.0, plot=True, ax=axs[1,i])
             p_left.append(p)
             labels.append(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (B)')
     plt.tight_layout()
@@ -378,18 +382,22 @@ if __name__ == '__main__':
     x = np.vstack([psds_right_rest, psds_right]) #(trial, ch, bin)
     # Generate labels for rest (True) and task (False)
     isTreatment = np.arange(x.shape[0]) < psds_right_rest.shape[0] #(trial,)
-    isContrast = isLeft
+    isContralat = isLeft
 
-    for i in range(N):
-        STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContrast, bins=bins_ticks, custom_bins=[freq_band[i], freq_band[i+1]])
-        r2_right.append(STAT.DifferenceOfR2(x, isTreatment))
+    for i in range(len(freq_band)-1):
+        STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContralat, bins=bins_ticks, custom_bins=[freq_band[i], freq_band[i+1]])
+        # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
+        x_ = np.mean(x[:, :, STAT.custom_ticks[0] : STAT.custom_ticks[-1]], axis=2)
+        # Transform PSDs to dB
+        x_ = EEG.convert_dB(x_)
+        r2_right.append(STAT.DifferenceOfR2(x_, isTreatment))
         if perm_bool:
             if i == 0: axs[0,i].set_title(r'Open/Close Right', fontsize=12,weight='bold', loc='left')
             axs[0,i].set_title(f'[{freq_band[i]}-{freq_band[i+1]-1}] Hz', fontsize=12, loc='right')
-            p = STAT.ApproxPermutationTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, plot=True, ax=axs[0,i])
+            p = STAT.ApproxPermutationTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, plot=True, ax=axs[0,i])
             p_right.append(p)
         if boot_bool:
-            p = STAT.BootstrapTest(x=x, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, nullHypothesisStatValue=0.0, plot=True, ax=axs[1,i])
+            p = STAT.BootstrapTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, nullHypothesisStatValue=0.0, plot=True, ax=axs[1,i])
             p_right.append(p)
     plt.tight_layout()
     plt.savefig(f'{path_to_folder}/test_right_{resolution}_Hz.png')

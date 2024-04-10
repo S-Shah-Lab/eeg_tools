@@ -1055,16 +1055,7 @@ class Stats:
         self.bins = bins
         self.transf = transf
 
-        self.delta_ticks  = np.where((self.bins>=1)  & (self.bins< 4 ))[0]
-        self.theta_ticks  = np.where((self.bins>=4)  & (self.bins< 8 ))[0]
-        self.alpha_ticks  = np.where((self.bins>=8)  & (self.bins<=12))[0]
-        self.beta_ticks   = np.where((self.bins>12)  & (self.bins<=30))[0]
-        self.gamma_ticks  = np.where((self.bins>30)  & (self.bins<=50))[0]
- 
-        if custom_bins == 'theta': self.custom_ticks = self.theta_ticks
-        if custom_bins == 'alpha': self.custom_ticks = self.alpha_ticks
-        if custom_bins == 'beta' : self.custom_ticks = self.beta_ticks
-        if custom_bins not in ['theta', 'alpha', 'beta']: self.custom_ticks = np.where((self.bins>=custom_bins[0]) & (self.bins<custom_bins[-1]))[0]
+        self.custom_ticks = np.where((self.bins >= custom_bins[0]) & (self.bins < custom_bins[-1]))[0]
 
         self.EEG = EEG()
 
@@ -1111,13 +1102,15 @@ class Stats:
         if not signed:
             return eta_squared
         else:
-            signs = np.where(mu1 - mu2 > 0, 1, -1)  # Determine the direction of the effect
+            signs = np.where(mu2 - mu1 > 0, 1, -1)  # Determine the direction of the effect
             return eta_squared * signs  # Return signed Eta squared values
 
 
     def Dummy(self, y=None):
         """
-        Converts a categorical variable to a numerical variable with a dummy trick
+        Converts a categorical variable to a numerical variable with a dummy trick, 
+        np.where(y==False, 1, 0) means give label 1 to trials with isTreatment = False
+        which by default is given to task trials
 
         Args:
             y (numpy array): Contains True or False for two classes
@@ -1213,16 +1206,13 @@ class Stats:
             The difference between the sum of the transformed data for contralateral electrodes and
             the sum for ipsilateral electrodes, based on the specified frequency bins.
         """
-        # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
-        x = np.mean(x[:, :, self.custom_ticks[0]:self.custom_ticks[-1]], axis=2)
-        # Transform PSDs to dB
-        x = self.EEG.convert_dB(x)
         # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch) -> (ch,)
         x = self.Transform(x, isTreatment)
-        # Sum the averages for contralateral electrodes
+        # Values for Contralateral electrodes
         x1 = x[self.isContralat]
-        # Identify and sum the averages for ipsilateral electrodes
+        # Ipsilateral electrodes
         isIpsilat = self.FindSymmetric(isContralat=self.isContralat)
+        # Values for Ipsilateral electrodes
         x2 = x[isIpsilat]
         # Compute and return the difference between the sums for ipsilateral - contralateral electrodes
         return  np.sum(x2) - np.sum(x1)
@@ -1246,10 +1236,6 @@ class Stats:
             - The output array `r2` is initialized to zeros and filled with the computed R² differences for electrodes identified as
               ipsilateral, with the contralateral differences being directly subtracted.
         """
-        # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
-        x = np.mean(x[:, :, self.custom_ticks[0]:self.custom_ticks[-1]], axis=2)
-        # Transform PSDs to dB
-        x = self.EEG.convert_dB(x)
         # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch) -> (ch,)
         x = self.Transform(x, isTreatment)
         # Sum the averages for contralateral electrodes
@@ -1472,12 +1458,18 @@ class Stats:
         Returns:
             tuple: Lower bound, observed proportion, and upper bound of the 95% confidence interval for the proportion.
         """
+        # Safety measure for p = 0
+        if p == 0:
+            p_ = 1e-7
+        else:
+            p_ = p 
+
         # Calculate upper and lower bounds of the 95% confidence interval
-        p_up = p + 1.96 * np.sqrt(p * (1 - p) / N)
-        p_down = p - 1.96 * np.sqrt(p * (1 - p) / N)
+        p_up = p_ + 1.96 * np.sqrt(p_ * (1 - p_) / N)
+        p_down = p_ - 1.96 * np.sqrt(p_ * (1 - p_) / N)
         
         # Adjust lower bound if necessary to avoid negative probability
-        if p_down <= 0: p_down = 1e-7
+        if p_down <= 0: p_down = 0.5e-7
         return p_down, p, p_up
 
 
@@ -1491,7 +1483,10 @@ class Stats:
         Returns:
             The negative natural logarithm of the probability `p`.
         """
-        return -np.log(p)
+        if p>0: 
+            return -np.log(p)
+        else:
+            return -np.log(1e-6) 
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
