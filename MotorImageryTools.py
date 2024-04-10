@@ -12,6 +12,12 @@ from pyprep.prep_pipeline import PrepPipeline, NoisyChannels
 
 import eeg_dict # Contains dictionaries and libraries for electrodes locations 
 
+
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# EEG
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 class EEG():
     """
     A class for loading and preprocessing EEG data files.
@@ -416,7 +422,8 @@ class EEG():
             isRansac (bool): If True, identifies bad channels using RANSAC.
         """
         # Initialize NoisyChannels with the RAW object
-        NC = NoisyChannels(RAW, do_detrend=False)
+        # Fix a random state to use throughout the analysis
+        NC = NoisyChannels(RAW, do_detrend=False, random_state=83092)
 
         # Apply different criteria based on the function parameters to find bad channels
         if isSNR: NC.find_bad_by_SNR()
@@ -450,7 +457,8 @@ class EEG():
         # Mark identified bad channels in the RAW object
         RAW.info["bads"] = []
         RAW.info["bads"].extend(np.unique(ch_names_bad).tolist())
-        print(f'After RANSAC: {RAW.info["bads"]}')
+        print(f"After RANSAC: {RAW.info['bads']}")
+        print(f"Fraction on bad channels: {len(RAW.info['bads'])} / {len(RAW.info['ch_names'][:RAW.get_data(picks='eeg').shape[0]])} = {len(RAW.info['bads']) * 100 / len(RAW.info['ch_names'][:RAW.get_data(picks='eeg').shape[0]])}%")
 
 
     def mark_BAD_region(self, RAW=None, block=None):
@@ -711,7 +719,7 @@ class EEG():
         Creates and plots a montage for EEG data based on the specified montage type and channels.
 
         Args:
-            montage_type: The type of montage to create. Supported types  []'DSI_24', 'GTEC_32', 'EGI_128']
+            montage_type: The type of montage to create. Supported types  ['DSI_24', 'GTEC_32', 'EGI_128']
             ch_to_show: List of channels to be displayed in the montage plot.
             conv_dict: Optional dictionary for converting channel names from the montage names to custom names.
 
@@ -724,11 +732,13 @@ class EEG():
         elif montage_type == 'EGI_128': 
             montage = mne.channels.make_standard_montage('GSN-HydroCel-129')
         
+        montage.ch_names = [x.lower() for x in montage.ch_names]
+
         idx = []
         # Determine indices for the channels to show, using conversion dictionary if provided
         for ch in ch_to_show:
-            if montage_type == 'EGI_128': idx.append(montage.ch_names.index(conv_dict[ch]))
-            else: idx.append(montage.ch_names.index(ch))
+            if montage_type == 'EGI_128': idx.append(montage.ch_names.index(conv_dict[ch.lower()]))
+            else: idx.append(montage.ch_names.index(ch.lower()))
         
         # Update montage to only include specified channels
         montage.ch_names = ch_to_show
@@ -995,6 +1005,12 @@ class EEG():
         return 10 * np.log10(X * 1e12)
 
 
+
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# STATS
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 class Stats:
     """
     A class for performing permutation and bootstrap tests on PSDs which are transformed into eta-square values at each electrode.
@@ -1021,6 +1037,7 @@ class Stats:
         Transform
         DifferenceOfSumsR2
         DifferenceOfR2
+        SimpleDifferenceOfR2
         FindSymmetric
         Shuffle
         ApproxPermutationTest
@@ -1030,7 +1047,7 @@ class Stats:
         negP
     """
 
-    def __init__(self, ch_set=None, dict_symm=None, isContralat=None, bins=None, custom_bins=None, transf='eta2'):
+    def __init__(self, ch_set=None, dict_symm=None, isContralat=None, bins=None, custom_bins=None, transf='r2'):
         self.ch_set = ch_set
         self.ch_names = np.array(self.ch_set.get_labels())
         self.dict_symm = dict_symm
@@ -1047,7 +1064,9 @@ class Stats:
         if custom_bins == 'theta': self.custom_ticks = self.theta_ticks
         if custom_bins == 'alpha': self.custom_ticks = self.alpha_ticks
         if custom_bins == 'beta' : self.custom_ticks = self.beta_ticks
-        if custom_bins not in ['theta', 'alpha', 'beta']: self.custom_ticks = np.where((self.bins>=custom_bins[0]) & (self.bins<=custom_bins[-1]))[0]
+        if custom_bins not in ['theta', 'alpha', 'beta']: self.custom_ticks = np.where((self.bins>=custom_bins[0]) & (self.bins<custom_bins[-1]))[0]
+
+        self.EEG = EEG()
 
     def CalculateEtas2(self, x=None, isTreatment=None, signed=True):
         """
@@ -1106,7 +1125,7 @@ class Stats:
         Returns: 
             numpy array: Numerical variable with 0 and 1
         """
-        return np.where(y==False, 0, 1)
+        return np.where(y==False, 1, 0)
 
 
     def CalculateR(self, x=None, isTreatment=None):
@@ -1184,7 +1203,7 @@ class Stats:
 
     def DifferenceOfSumsR2(self, x=None, isTreatment=None):
         """
-        Calculates the difference between the sums of transformed data for contralateral and ipsilateral electrodes.
+        Calculates the difference between the sums of transformed data for ipsilateral - contralateral electrodes.
 
         Args:
             x: Data array with shape (trial, ch, bin)
@@ -1197,7 +1216,7 @@ class Stats:
         # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
         x = np.mean(x[:, :, self.custom_ticks[0]:self.custom_ticks[-1]], axis=2)
         # Transform PSDs to dB
-        x = 10 * np.log(x * 1e12)
+        x = self.EEG.convert_dB(x)
         # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch) -> (ch,)
         x = self.Transform(x, isTreatment)
         # Sum the averages for contralateral electrodes
@@ -1205,13 +1224,13 @@ class Stats:
         # Identify and sum the averages for ipsilateral electrodes
         isIpsilat = self.FindSymmetric(isContralat=self.isContralat)
         x2 = x[isIpsilat]
-        # Compute and return the difference between the sums for contralateral and ipsilateral electrodes
-        return np.sum(x1) - np.sum(x2)
+        # Compute and return the difference between the sums for ipsilateral - contralateral electrodes
+        return  np.sum(x2) - np.sum(x1)
 
 
     def DifferenceOfR2(self, x=None, isTreatment=None):
         """
-        Calculates the difference in R² values between contralateral and ipsilateral electrodes for topoplot visualization.
+        Calculates the difference in R² values between ipsilateral - contralateral electrodes for topoplot visualization.
 
         Args:
             x: Data array with shape (trial, ch, bin)
@@ -1225,12 +1244,12 @@ class Stats:
               that methods exist for transforming data (`Transform`), finding symmetric electrodes (`FindSymmetric`), and identifying
               electrode indices (`ch_set.find_labels` and `ch_set.get_labels`).
             - The output array `r2` is initialized to zeros and filled with the computed R² differences for electrodes identified as
-              contralateral, with the ipsilateral differences being directly subtracted.
+              ipsilateral, with the contralateral differences being directly subtracted.
         """
         # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
         x = np.mean(x[:, :, self.custom_ticks[0]:self.custom_ticks[-1]], axis=2)
         # Transform PSDs to dB
-        x = 10 * np.log(x * 1e12)
+        x = self.EEG.convert_dB(x)
         # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch) -> (ch,)
         x = self.Transform(x, isTreatment)
         # Sum the averages for contralateral electrodes
@@ -1240,9 +1259,43 @@ class Stats:
         x2 = x[isIpsilat]
         # Initialize R² difference array
         r2 = np.zeros(len(self.ch_names))
-        # Compute R² differences for matched contralateral and ipsilateral electrodes
+        # Compute R² differences for matched ipsilateral - contralateral electrodes
         for i, j in zip(self.ch_set.find_labels(np.array(self.ch_set.get_labels())[self.isContralat]), range(len(self.isContralat))):
-            r2[i] = x1[j] - x2[j]
+            r2[i] =  x2[j] - x1[j]
+        # Return the transformed data
+        return x
+
+
+    def SimpleDifferenceOfR2(self, x=None, isTreatment=None):
+        """
+        Calculates the difference in R² values between ipsilateral - contralateral electrodes for topoplot visualization. No averaging happening over frequency band needed, also the data is assumed to be in dB already.
+
+        Args:
+            x: Data array with shape (trial, ch)
+            isTreatment: Boolean array indicating treatment group membership for each element in `x`.
+
+        Returns:
+            A numpy array of R² differences suitable for plotting on a topoplot, emphasizing hemispheric differences in brain activity.
+
+        Note:
+            - The function assumes that electrode symmetry and hemisphere information are properly defined in `self.isContralat` and
+              that methods exist for transforming data (`Transform`), finding symmetric electrodes (`FindSymmetric`), and identifying
+              electrode indices (`ch_set.find_labels` and `ch_set.get_labels`).
+            - The output array `r2` is initialized to zeros and filled with the computed R² differences for electrodes identified as
+              contralateral, with the ipsilateral differences being directly subtracted.
+        """
+        # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch) -> (ch,)
+        x = self.Transform(x, isTreatment)
+        # Sum the averages for contralateral electrodes
+        x1 = x[self.isContralat]
+        # Identify and sum the averages for ipsilateral electrodes
+        isIpsilat = self.FindSymmetric(isContralat=self.isContralat)
+        x2 = x[isIpsilat]
+        # Initialize R² difference array
+        r2 = np.zeros(len(self.ch_names))
+        # Compute R² differences for matched ipsilateral - contralateral electrodes
+        for i, j in zip(self.ch_set.find_labels(np.array(self.ch_set.get_labels())[self.isContralat]), range(len(self.isContralat))):
+            r2[i] =  x2[j] - x1[j]
         # Return the transformed data
         return x
 
@@ -1280,7 +1333,7 @@ class Stats:
         return a
 
 
-    def ApproxPermutationTest(self, x=None, isTreatment=None, stat=None, nSimulations=1999, plot=False):
+    def ApproxPermutationTest(self, x=None, isTreatment=None, stat=None, nSimulations=1999, plot=False, ax=False):
         """
         One-sided two-sample approximate permutation test assuming the value of `stat(x,isTreatment)` is expected to be larger under H1 than under H0.
 
@@ -1314,15 +1367,22 @@ class Stats:
         # Calculate p-value
         p = (0.5 + nReached) / (1.0 + nSimulations)
         if plot:  # Optionally plot the distribution of permuted statistics
-            plt.hist(hist, label=f'N = {nSimulations}')
-            plt.axvline(observed, color='black', label=f'Obs: {round(observed, 3)}')
-            plt.xlabel(r'$\Delta$', loc='right')
-            plt.legend(title=f'Permutation (p = {round(p,3)})', loc='upper left', frameon=False)
-            plt.arrow(observed, 20, 0.1, 0, color='black', length_includes_head=False, head_width=20, head_length=0.05)
+            if ax: 
+                ax.hist(hist, label=f'N = {nSimulations}')
+                ax.axvline(observed, color='black', label=f'Obs: {round(observed, 3)}')
+                ax.set_xlabel(r'$\Delta$', loc='right')
+                ax.legend(title=f'Permutation (p = {round(p,3)})', loc='upper left', frameon=False)
+                ax.arrow(observed, 20, 0.1, 0, color='black', length_includes_head=False, head_width=20, head_length=0.05)
+            else: 
+                plt.hist(hist, label=f'N = {nSimulations}')
+                plt.axvline(observed, color='black', label=f'Obs: {round(observed, 3)}')
+                plt.xlabel(r'$\Delta$', loc='right')
+                plt.legend(title=f'Permutation (p = {round(p,3)})', loc='upper left', frameon=False)
+                plt.arrow(observed, 20, 0.1, 0, color='black', length_includes_head=False, head_width=20, head_length=0.05)
         return p
 
 
-    def BootstrapTest(self, x=None, isTreatment=None, stat=None, nSimulations=1999, nullHypothesisStatValue=0.0, plot=False):
+    def BootstrapTest(self, x=None, isTreatment=None, stat=None, nSimulations=1999, nullHypothesisStatValue=0.0, plot=False, ax=False):
         """
         Efron & Tibshirani page 215, equation (15.32)
 
@@ -1352,12 +1412,20 @@ class Stats:
         # Calculate p-value
         p = (0.5 + nReached) / (1.0 + nSimulations)
         if plot:  # Optionally plot the distribution of bootstrap statistics 
-            plt.hist(hist, label=f'N = {nSimulations}', color='seagreen')
-            plt.axvline(observed, color='black', label=f'Obs: {round(observed, 3)}') # Observed statistic value
-            plt.axvline(nullHypothesisStatValue, color='red', label=f'$H_{0}$: $\Delta$ = {nullHypothesisStatValue}')  # Null hypothesis value
-            plt.xlabel(r'$\Delta$', loc='right')
-            plt.legend(title=f'Bootstrap (p = {round(p,3)})', loc='upper left', frameon=False)
-            plt.arrow(nullHypothesisStatValue, 20, -0.1, 0, color='red', length_includes_head=False, head_width=20, head_length=0.05)
+            if ax: 
+                ax.hist(hist, label=f'N = {nSimulations}', color='seagreen')
+                ax.axvline(observed, color='black', label=f'Obs: {round(observed, 3)}') # Observed statistic value
+                ax.axvline(nullHypothesisStatValue, color='red', label=f'$H_{0}$: $\Delta$ = {nullHypothesisStatValue}')  # Null hypothesis value
+                ax.set_xlabel(r'$\Delta$', loc='right')
+                ax.legend(title=f'Bootstrap (p = {round(p,3)})', loc='upper left', frameon=False)
+                ax.arrow(nullHypothesisStatValue, 20, -0.1, 0, color='red', length_includes_head=False, head_width=20, head_length=0.05)
+            else: 
+                plt.hist(hist, label=f'N = {nSimulations}', color='seagreen')
+                plt.axvline(observed, color='black', label=f'Obs: {round(observed, 3)}') # Observed statistic value
+                plt.axvline(nullHypothesisStatValue, color='red', label=f'$H_{0}$: $\Delta$ = {nullHypothesisStatValue}')  # Null hypothesis value
+                plt.xlabel(r'$\Delta$', loc='right')
+                plt.legend(title=f'Bootstrap (p = {round(p,3)})', loc='upper left', frameon=False)
+                plt.arrow(nullHypothesisStatValue, 20, -0.1, 0, color='red', length_includes_head=False, head_width=20, head_length=0.05)
         return p
 
 
@@ -1426,29 +1494,9 @@ class Stats:
         return -np.log(p)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# PLOTTING
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 class Plotting():
     """
     A class for generating various plots.
@@ -1497,8 +1545,10 @@ class Plotting():
         self.kelvin_i_cmap = self.make_cmap(kelvin_i, 'kelvin_i', 256)
         self.simple_cmap = self.make_simple_cmap(c1='blue', c2='white', c3='red')
 
+        self.EEG = EEG()
 
-    def show_electrode(self, ch_location=None, ch_list=None, label=False, color='red', alpha=1, ax=None, alpha_back=0.5):
+
+    def show_electrode(self, ch_location=None, ch_list=None, label=False, color='red', alpha=1, ax=None, alpha_back=0.5, marker='o'):
         """
         Displays electrode positions on a 2D plot.
 
@@ -1510,6 +1560,7 @@ class Plotting():
             alpha (float): Opacity level for the highlighted channels.
             ax (matplotlib.axes.Axes): Axis containing the plot.
             alpha_back (float): Opacity of background channels. 
+            marker (str): Marker type for electrode of interest. Can be used to show bad channels. 
 
         Returns:
             None
@@ -1517,19 +1568,22 @@ class Plotting():
         # Plot all electrodes in grey with partial opacity
         if ax: ax.scatter([x[1] for x in ch_location], [x[2] for x in ch_location], color='grey', alpha=alpha_back)
         else: plt.scatter([x[1] for x in ch_location], [x[2] for x in ch_location], color='grey', alpha=alpha_back)
-        # Exit if no channels to highlight
-        if not ch_list: 
+        # List can be empty (e.g. no bad channels)
+        if ch_list == []:
+            pass 
+        # or List can be None, if no ch_list is passed
+        elif ch_list == None: 
             ch_list = [ch[0] for ch in ch_location]
          
         # Highlight and optionally label specified channels
         for i,ch in enumerate(ch_list): 
             y = [[x[1],x[2]] for x in ch_location if x[0]==ch][0]
             if type(color)==list and len(color)>1: 
-                if ax: ax.scatter(y[0], y[1], color=color[i], alpha=alpha)
-                else: plt.scatter(y[0], y[1], color=color[i], alpha=alpha)
+                if ax: ax.scatter(y[0], y[1], color=color[i], alpha=alpha, marker=marker)
+                else: plt.scatter(y[0], y[1], color=color[i], alpha=alpha, marker=marker)
             else: 
-                if ax: ax.scatter(y[0], y[1], color=color, alpha=alpha)
-                else: plt.scatter(y[0], y[1], color=color, alpha=alpha)
+                if ax: ax.scatter(y[0], y[1], color=color, alpha=alpha, marker=marker)
+                else: plt.scatter(y[0], y[1], color=color, alpha=alpha, marker=marker)
             if label: 
                 if ax: ax.text(y[0], y[1], ch)
                 else: plt.text(y[0], y[1], ch)
@@ -1557,7 +1611,7 @@ class Plotting():
                 else: plt.text(text_pos, ylim[1] - delta, band, horizontalalignment='center', fontsize=fontsize)
 
 
-    def plot_topomap_L_R(self, ax=None, RAW=None, dataL=None, dataR=None, cmap='viridis', vlim=None, masks=None, mask_params=None, text_range=None, text=None):
+    def plot_topomap_L_R(self, ax=None, RAW=None, dataL=None, dataR=None, cmap='viridis', vlim=None, masks=None, mask_params=None, text=None):
         """
         Plots left and right EEG topomaps using MNE's plot_topomap function.
 
@@ -1570,7 +1624,6 @@ class Plotting():
             vlim (tuple of float, optional): Value limits for the colormap.
             masks (list of numpy.ndarray): List of masks to apply to the topomap data.
             mask_params (list of dict): List of dictionaries specifying parameters for each mask.
-            text_range (str): Text to display as the title of the topomaps indicating the data range or condition.
             text (bool, optional): Flag to indicate whether additional text labels should be added to the colorbar axis.
         """
 
@@ -1579,14 +1632,12 @@ class Plotting():
                                       mask=masks[0], mask_params=mask_params[0], show=False, axes=ax[0])
         im, cm = mne.viz.plot_topomap(dataL, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim,
                                       mask=masks[1], mask_params=mask_params[1], show=False, axes=ax[0])
-        ax[0].set_title(f"{text_range} (Left)")
 
         # Plot right hemisphere topomap
         im, cm = mne.viz.plot_topomap(dataR, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim,
                                       mask=masks[0], mask_params=mask_params[0], show=False, axes=ax[1])
         im, cm = mne.viz.plot_topomap(dataR, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim,
                                       mask=masks[2], mask_params=mask_params[1], show=False, axes=ax[1])
-        ax[1].set_title(f"{text_range} (Right)")
 
         # Prepare colorbar axis
         clim = dict(kind='value', lims=[vlim[0], 0, vlim[1]])
@@ -1601,9 +1652,11 @@ class Plotting():
 
         # Add optional text to colorbar axis
         if text:
-            ax[2].text(0, 0.26, 'Target (.)', color='lime')
-            ax[2].text(0, 0.25, 'Target (.)', color='black')
-            ax[2].text(0, 0.1, 'Interpolated (x)', color='black')
+            ax[2].text(-0.2, 0.73, r'$r^{2}$ Coefficients', color='black')
+            ax[2].text(-0.2, 0.60, 'Target (O)',            color='lime')
+            ax[2].text(-0.2, 0.59, 'Target (O)',            color='black')
+            ax[2].text(-0.2, 0.45, 'Interpolated (X)',      color='black')
+            #ax[2].text(-0.2, 0.30, '',      color='black')
 
         # Note: Some lines seem to repeat with slight modifications (e.g., mask parameters). It's assumed these are intentional
         # for demonstration purposes. Ensure this aligns with your actual processing needs.
@@ -1641,3 +1694,176 @@ class Plotting():
                   (1.0, c3)]     # Color at 1
 
         return LinearSegmentedColormap.from_list('custom_cmap', colors)
+
+
+    def linear_paras_from_corr(self, x=None, y=None, r=None):
+        """
+        Calculates the linear regression parameters (a,b) given a correlation coefficient (r)
+        
+        Args:
+            x (numpy array or list): independent variable
+            y (numpy array or list): dependent variable
+            r (float): correlation coefficient
+            
+        Returns:
+            (float, float): intercept and slope of line
+        """
+        b = r * np.std(y) / np.std(x)
+        a = np.mean(y) - b * np.mean(x)
+        return a, b
+
+
+    def process_freq_band(self, x=None, bins=None, freq_band=None):
+        """
+        Creates parameters to use in plots given a frequency band
+        
+        Args:
+            x (numpy array): PSD of trials in a specific channel in the entire frequency range of dimension (trial, 1, bin)
+            bins (numpy array): tick values of the total frequency range
+            freq_band (list of tuple): first and last frequency values for the considered frequency band (e.g. [8,12])
+        
+        Returns: 
+            tuple: mid point of the frequency band (float), 
+                   average of PSD in dB in frequency band of each trial (numpy array), 
+                   total width of the frequency band (float)
+        """
+        # Identify index of frequency bins to consider
+        bins_idx = np.where(( bins >= freq_band[0] ) & ( bins < freq_band[-1] ))[0] # (bin*,)
+        # Consider only frequency band
+        trials = x[ :, 0, bins_idx[0] : bins_idx[-1] ] # (trial, bin*)
+        # Frequency bands mid points
+        x_ = ( freq_band[0] + freq_band[-1] ) / 2 # float
+        # Frequency bands total width
+        w_ = freq_band[-1] - freq_band[0] # float
+        # Aggregate frequency bands
+        y_ = np.mean(trials, axis=1) # (trial,)
+        # Convert to dB
+        y_ = self.EEG.convert_dB(y_) # (trial,)
+        
+        return x_, y_, w_
+
+
+    def plot_psd_at_channel(self, x=None, color=None, ax=None, freq_band=None, bins=None):
+        """
+        Plots trials in dB units and a box plot for each frequency band with the trial distribution
+        
+        Args:
+            x (numpy array): PSD of trials in a specific channel in the entire frequency range of dimension (trial, 1, bin)
+            color (str): color to use in the plot.
+            ax (matplotlib.axes.Axes): Axis containing the plot. This is optional.
+            freq_band (list or numpy array): List of frequency boundaries to consider
+            bins (numpy array): tick values of the total frequency range
+            
+        Returns:
+            list of numpy array: List with the trials in each frequency band converted to dB
+        """
+        xs, ys, ws = [], [], []
+        
+        for start,end in zip(freq_band[0:], freq_band[1:]):
+            x_, y_, w_ = self.process_freq_band(x=x, bins=bins, freq_band=[start, end])
+            xs.append(x_)
+            ys.append(y_)
+            ws.append(w_)
+
+        if ax: 
+            # Plotting within ax
+            # Creating box plots with specified positions and widths
+            boxplots = ax.boxplot(ys,
+                                  positions=xs, 
+                                  widths=ws, 
+                                  showfliers=False, capwidths=0.3)
+            
+            # Plot each trial across the frequency bins
+            for i in range(x.shape[0]):
+                y = x[i].ravel() # (bin,)
+                ax.plot(bins, self.EEG.convert_dB(y), color=color, alpha=0.1)
+                
+        else:
+            # Plotting without any specified ax
+            # Creating box plots with specified positions and widths
+            boxplots = plt.boxplot(ys,
+                                   positions=xs, 
+                                   widths=ws, 
+                                   showfliers=False, capwidths=0.3)
+            
+            # Plot each trial across the frequency bins
+            for i in range(x.shape[0]):
+                y = x[i].ravel() # (bin,)
+                plt.plot(bins, self.EEG.convert_dB(y), color=color, alpha=0.1)
+                
+        # Change color of medians
+        for median in boxplots['medians']: median.set_color(color)
+                
+        return xs, ys, ws
+
+
+    def plot_correlation_psd_groups(self, x=None, y=None, isTreatment=None, r=None, xlim=None, ax=None):
+        """
+        Plot the trials divided into categories in a specific frequency band, show the linear regression between the categories (using dummy variables)
+        
+        Args:
+            x (numpy array): PSD of trials in a specific channel in the entire frequency range of dimension (trial, 1, bin)
+            y (numpy array): Dummy variable for isTreatment
+            isTreatment (numpy array): Array of labels assigned to each trial. True for Rest, False for Task.
+            r (float): Correlation coefficient between the groups of PSDs.
+            ax (matplotlib.axes.Axes): Axis containing the plot. This is optional.
+            
+        Returns:
+            None
+        """
+        # Calculate the linear regression parameters (a,b) starting with correlation coeff. (r)
+        x_axis = np.linspace(np.min(x), np.max(x), 1000)
+        a, b = self.linear_paras_from_corr(x, y, r)
+        y_axis = a + x_axis * b
+            
+        if ax: 
+            # Plotting within ax
+            # Plot Rest trials in one group 
+            ax.scatter(x[isTreatment], y[isTreatment],  color='navy', alpha=0.5)
+            # Plot Task trials in one group 
+            ax.scatter(x[~isTreatment],y[~isTreatment], color='green', alpha=0.5)
+
+            # Plot means of each category
+            ax.axvline(np.mean(x[isTreatment]),  lw=1, color='navy', alpha=1)
+            ax.axvline(np.mean(x[~isTreatment]), lw=1, color='green', alpha=1)
+            
+            # Trace each group (0 or 1) along the x axis
+            for line in np.unique(y): 
+                ax.axhline(line, lw=1, ls='--', color='grey')
+            
+            # Plot linear regression
+            ax.plot(x_axis, y_axis, color='grey')
+            
+            # Add text window with r and r2 parameters
+            ax.text(xlim[-1] - np.abs(xlim[-1])*0.65, 0.45, f'r = {round(r[0], 3)}\nr$^{2}$ = {round(r[0]*abs(r[0]), 3)}')
+            
+            ax.set_ylim(-0.3, 1.3)
+            ax.set_xlabel('PSD [dB]', loc='right', fontsize=11)
+            ax.set_yticks([0,1])
+            ax.set_yticklabels(['Task', 'Rest'], rotation=0)
+            
+        else: 
+            # Plotting without any specified ax
+            # Plot Rest trials in one group 
+            plt.scatter(x[isTreatment], y[isTreatment],  color='navy', alpha=0.5)
+            # Plot Task trials in one group 
+            plt.scatter(x[~isTreatment],y[~isTreatment], color='green', alpha=0.5)
+
+            # Plot means of each category
+            plt.axvline(np.mean(x[isTreatment]),  lw=1, color='navy', alpha=1)
+            plt.axvline(np.mean(x[~isTreatment]), lw=1, color='green', alpha=1)
+            
+            # Trace each group (0 or 1) along the x axis
+            for line in np.unique(y): 
+                plt.axhline(line, lw=1, ls='--', color='grey')
+            
+            # Plot linear regression
+            plt.plot(x_axis, y_axis, color='grey')
+            
+            # Add text window with r and r2 parameters
+            plt.text(xlim[-1] - np.abs(xlim[-1])*0.65, 0.45, f'r = {round(r[0], 3)}\nr$^{2}$ = {round(r[0]*abs(r[0]), 3)}')
+            
+            plt.ylim(-0.3, 1.3)
+            plt.xlabel('PSD [dB]', loc='right', fontsize=11)
+            plt.yticks([0,1])
+            plt.yticks(['Task', 'Rest'], rotation=0)
