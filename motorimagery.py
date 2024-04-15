@@ -10,6 +10,8 @@ if __name__ == '__main__':
     parser.add_argument( '-fmin',  metavar='fmin',       type=float, default=1.,              help="min frequency to consider")
     parser.add_argument( '-fmax',  metavar='fmax',       type=float, default=40.,             help="max frequency to consider")
     parser.add_argument( '-fband', metavar='fband',      type=list,  default=[4.,8.,13.,31.], help="frequency band sections of interest")
+    parser.add_argument( '-prep',  metavar='prep',       type=bool,  default=True,            help="do you want to run prep?")
+    parser.add_argument( '-xray',  metavar='xray',       type=list,  default=['c3', 'c4'],    help="which channels do you want to take a detailed look at?")
     opts = parser.parse_args()
 
 import os
@@ -31,105 +33,131 @@ plot_style.set_plot_style()
 
 
 if __name__ == '__main__':
-    EEG = mi.EEG() # Initialize EEG tools
+    # Initialize EEG tools and plotting classes
+    EEG = mi.EEG()       # Initialize EEG tools
     PLOT = mi.Plotting() # Initialize Plotting tools
 
-    # Handle the input options
-    clean_bool = opts.c
-    file_path, file_name = os.path.split(opts.f)
-    resolution = opts.r
-    secPerSegment = 1/resolution
-    secOverlap = secPerSegment/2
-    fmin = opts.fmin
-    fmax = opts.fmax
-    freq_band = opts.fband
-    
-    ch_location = eeg_dict.ch_location
+    # Store input options into variables
+    clean_bool = opts.c                              # does the imported .dat file have a previously cleaned .fif file?
+    file_path, file_name = os.path.split(opts.f)     # split imported file info into path and name
+    resolution = opts.r                              # PSD frequency resolution 
+    secPerSegment = 1/resolution                     # how long are the segments in Welch PSD method
+    secOverlap = secPerSegment/2                     # how long are the overlapping parts in Welch PSD method
+    fmin = opts.fmin                                 # lowest frequency in PSD spectrum
+    fmax = opts.fmax                                 # highest frequency in PSD spectrum
+    freq_band = opts.fband                           # list w/ frequency boundaries for each 
+    prep = opts.prep                                 # do you want to run prep?
+    chs = opts.xray                                  # which channels do you want to take a detailed look at? ['c3', 'c4']
+
+    #ch_location = eeg_dict.ch_location               # dictionary with channel names and their x,y location
 
     # Extract base name from file
     base_name, extension = os.path.splitext(file_name)
+    #sub_name = base_name.split('-')[0]                   # WARNING: this is temporary and not good for bids format
+    #ses_name = base_name.split('-')[1].split('ses')[1]   # WARNING: this is temporary and not good for bids format
+
+    sub_name = 'RI' + base_name.split('_')[0].split('peds')[1]
+    ses_name = base_name.split('_')[1].split('-')[1]
+
+    text_id = 'Sub' + f' $\mathbf{{{sub_name}}}$,  ' + 'Ses' + f' $\mathbf{{{ses_name}}}$'
 
     # Create a folder using base name, if folder doesn't exist 
     path_to_folder = EEG.create_folder(path=file_path, folder_name=base_name)
 
-
     # Import .dat file
     signal, states, fs, ch_names, blockSize, montage_type = EEG.import_file_dat(file_path, file_name)
 
+    # The montage_type is automatically decided by the dimensions of the signal matrix
+    # ch_info contains the channel names for that specific montage
     if montage_type == 'DSI_24': ch_info = 'DSI24_location.txt'
     elif montage_type == 'EGI_128': ch_info = 'EGI128_location.txt'
     elif montage_type == 'GTEC_32': ch_info = 'GTEC32_location.txt'
 
-
+    # Define paradigm information based on blocksize of the EEG file
+    # If fs % blocksize == 0: 
+    #    the blocksize fits perfectly in the sampling frequency so if a time window has a integer length (e.e 2 seconds) all blocks will be saved
+    #    this might not be true for decimal length windows (e.g. 2.4 seconds), but our motorimagery doesn't have any
     fileTime, nBlocks, trialsPerBlock, initialSec, stimSec, taskSec = EEG.evaluate_mi_paradigm(signal=signal, states=states, fs=fs, blockSize=blockSize, verbose=True)
+    # Number of epochs each trial is split into
     nSplit = 6
+    # Rejected seconds after end of cue
+    # Here we are making sure the task trial length is 9 seconds
     rejectSec = taskSec - 9 # 1 [s]
 
+    # Min and max time for each epoch
     tmin = 0
     twindow = (taskSec - rejectSec) # e.g. 9
     tmax = twindow/nSplit # e.g. 1.5
 
-
     # File has not been cleaned before, it's a new file
     if not clean_bool:
         # Define initial ChannelSet
+        # ChannelSet comes from BCI2000Tools, it contains information regarding a specific montage and can be used for transformation of the signal matrix
         ch_set = ChannelSet(ch_info)
 
-        # Create unfiltered RAW for PREP
-        RAW = EEG.make_RAW_with_montage(signal=signal * 1e-6, 
+        # Create RAW for PREP, signal is unfiltered
+        RAW = EEG.make_RAW_with_montage(signal=signal * 1e-6, # uV
                                         fs=fs, 
                                         ch_names=ch_set.get_labels(), 
                                         montage_type=montage_type, 
                                         conv_dict=eeg_dict.stand1020_to_egi)
 
         # Run PREP for bad channels
-        EEG.make_PREP(RAW, isSNR=False, isDeviation=False, isHfNoise=True, isNanFlat=True, isRansac=False)
+        # Don't run Ransac at first, it's ideal to run it after some bad channels are identified, if any
+        if prep: 
+            EEG.make_PREP(RAW, isSNR=False, isDeviation=False, isHfNoise=True, isNanFlat=True, isRansac=False)
 
         # Bandpass filter
         signalFilter = EEG.filter_data(signal, fs, l_freq=fmin, h_freq=fmax)
 
-        # Re-reference
+        # Re-reference only in the case of EGI_128 montage, the other ones we are using are ready to go
         if montage_type == 'EGI_128':
-            # Re-reference to mastoids
             signalFilter, ch_set = EEG.spatial_filter(sfilt='REF', 
                                                       ch_set=ch_set, 
                                                       signal=signalFilter, 
-                                                      flag_ch='tp9 1p10', 
+                                                      flag_ch='tp9 1p10',  # Re-reference to average of mastoids
                                                       verbose=True)
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # PLOT ChannelSet after potential re-reference
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        plt.figure(figsize=(7, 6))
+        plt.figure(figsize=(6, 6))
         ch_set.plot()
-        plt.text(-1.25, 1.05, f'Montage', weight='bold')
+        plt.text(-1, 1.15, f'Montage', weight='bold', va='top', ha='left', fontsize=12)
         split_text = montage_type.split('_')
-        plt.text(-1.25, 0.95, f'{split_text[0]} {split_text[1]} Channels')
+        plt.text(-1, 1.05, f'{split_text[0]} {split_text[1]} Channels', va='top', ha='left', fontsize=12)
+        plt.text(0.8, 1.15, f'Sub', weight='bold', va='top', ha='right', fontsize=12)
+        plt.text(1, 1.15, f'{sub_name}', va='top', ha='right', fontsize=12)
+        plt.text(0.8, 1.05, f'Ses', weight='bold', va='top', ha='right', fontsize=12)
+        plt.text(1, 1.05, f'{ses_name}', va='top', ha='right', fontsize=12)
         plt.tight_layout()
         # Save the plot
-        plt.savefig(f'{path_to_folder}/montage.png', bbox_inches='tight')
-        plt.savefig(f'{path_to_folder}/montage.pdf', bbox_inches='tight')
+        #plt.savefig(f'{path_to_folder}/montage.png', bbox_inches='tight')
+        #plt.savefig(f'{path_to_folder}/montage.pdf', bbox_inches='tight')
         plt.show()
 
-
-
-        # Create RAW with montage
-        RAW = EEG.make_RAW_with_montage(signal=signalFilter * 1e-6, 
+        # Create RAW with montage, signal is filtered
+        RAW = EEG.make_RAW_with_montage(signal=signalFilter * 1e-6, # uV
                                         fs=fs, 
                                         ch_names=ch_set.get_labels(), 
                                         montage_type=montage_type, 
                                         conv_dict=eeg_dict.stand1020_to_egi)
 
+        # Run PREP for bad channels
+        # Run Ransac 
+        if prep: 
+            EEG.make_PREP(RAW, isSNR=True, isDeviation=True, isHfNoise=True, isNanFlat=True, isRansac=True)
+
         # Mark BAD regions
         EEG.mark_BAD_region(RAW, block=True)
+
         # Summary of BAD regions (confirm the marking)
         EEG.evaluate_BAD_region(RAW, max_duration=fileTime)
         
-
-        # Add Stim to RAW
+        # Add Stimuli to RAW
         EEG.make_RAW_stim(RAW, states)
 
-        # Create annotations
+        # Create annotations on RAW object
         RAW = EEG.make_annotation_MI(RAW, fs,
                                     nBlocks=nBlocks,
                                     trialsPerBlock=trialsPerBlock,
@@ -140,32 +168,48 @@ if __name__ == '__main__':
                                     nSplit=nSplit,
                                     fileTime=fileTime)
 
-        # Here we can save RAW as .fif
+        # Save RAW as .fif
+        # This file can be imported later to skip all the previous steps
         EEG.save_RAW(RAW=RAW, path=file_path, file_name=base_name, label='')
 
     else: # if clean_bool: 
-        # Here we can import a previously saved .fif file
+        # Import a previously saved .fif file
         RAW, montage, fs = EEG.import_file_fif(path=file_path, file_name=base_name + '.fif')
-        #RAW.info['ch_names'] = [x.lower() for x in RAW.info['ch_names']]
+
+        # Define ChannelSet using RAW.info
+        # ChannelSet comes from BCI2000Tools, it contains information regarding a specific montage and can be used for transformation of the signal matrix
         ch_set = ChannelSet([x.lower() for x in RAW.info['ch_names'][:RAW.get_data(picks='eeg').shape[0]]])
-        # This is manually added here cause when you import a RAW .fif file it doesn't know the location of all EGI channels, it's inconvenient
+        
+        # There is a little problem with EGI_128 montage since the location of those electrodes is not known by ChannelSet
+        # We need to manually re-reference like we did before to the average of the mastoids
+        # Note: only the ChannelSet needs to be re-referenced, the signal matrtix is already ok since it's imported from before
+        # This is manually done here 
         if montage_type=='EGI_128':
+            # Define ChannelSet 
             ch_set = ChannelSet('EGI128_location.txt')
-            # make sure this rereference is the same as the one before saving the RAW .fif, it should be
+            
+            # Re-reference, make sure this is the same as the one done before saving the RAW .fif
             m = np.array(ch_set.RerefMatrix('tp9 tp10'))
-            # Occurs in place
+            
+            # Apply re-reference, occurs in place
             ch_set = ch_set.spfilt(m)
 
 
-    # RAW is saved without interpolation performed on it, in this way RAW.info['bads'] still contains the identified bad channels
-    # Interpolate BAD channels
+    # RAW was saved without interpolation, in this way RAW.info['bads'] still contains the identified bad channels, if any
+    # Store previosly identified bad channels
     old_ch_bads = RAW.info['bads']
+    
+    # Interpolate BAD channels, if any
     if not RAW.info['bads'] == []:
+        # Interpolate
         old_ch_bads = EEG.interpolate(RAW)
-        # Is any channel bad after interpolation? 
-        EEG.make_PREP(RAW, isSNR=True, isDeviation=True, isHfNoise=True, isNanFlat=True, isRansac=True)
-        print(f"Currently bad channels: {RAW.info['bads']}")
-        print(f'Old bad channels: {old_ch_bads}')
+        
+        # Is any channel BAD after interpolation? 
+        if prep: 
+            EEG.make_PREP(RAW, isSNR=True, isDeviation=True, isHfNoise=True, isNanFlat=True, isRansac=True)
+            print(f'Old bad channels: {old_ch_bads}')
+            print(f"Currently bad channels: {RAW.info['bads']}")
+        
 
     #RAW.plot()
 
@@ -194,7 +238,6 @@ if __name__ == '__main__':
     # Import annotations
     RAW_SL.set_annotations(RAW.annotations)
     #RAW_SL.plot()
-
 
     # Create Epochs and PSDs
     events_from_annot, event_dict = mne.events_from_annotations(RAW_SL)
@@ -275,7 +318,6 @@ if __name__ == '__main__':
                                     secPerSegment=secPerSegment, secOverlap=secOverlap, 
                                     nSkip=nSkip)
 
-
     # Find all channels on the left and right hemispheres
     isLeft_ch =  [x for x in eeg_dict.ch_central + eeg_dict.ch_parietal + eeg_dict.ch_frontal if x in EEG.find_ch_left(eeg_dict.ch_location)]
     isRight_ch = [x for x in eeg_dict.ch_central + eeg_dict.ch_parietal + eeg_dict.ch_frontal if x in EEG.find_ch_right(eeg_dict.ch_location)]
@@ -288,7 +330,7 @@ if __name__ == '__main__':
     # PLOT the electrodes used in the statistical tests
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     plt.figure(figsize=(6,4))
-    # All channels
+    # All channels in the montage
     PLOT.show_electrode(eeg_dict.ch_location, EEG.low(list(np.array(ch_setSLAP.get_labels()))), 
                         label=False, color='grey',   alpha_back=0, marker='o')
     # Left channels
@@ -328,7 +370,7 @@ if __name__ == '__main__':
     # STATISTICAL TESTS
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Generate frequency bins in each frequency band
-    bins_ticks = np.arange(fmin, fmax+1, int(resolution))
+    bins_ticks = np.arange(fmin, fmax + resolution, resolution)
 
     # Number of frequency bands to consider
     N = len(freq_band)-1
@@ -355,15 +397,20 @@ if __name__ == '__main__':
         # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
         x_ = np.mean(x[:, :, STAT.custom_ticks[0] : STAT.custom_ticks[-1]], axis=2)
         # Transform PSDs to dB
-        x_ = EEG.convert_dB(x_)
+        #x_ = EEG.convert_dB(x_)
         r2_left.append(STAT.DifferenceOfR2(x_, isTreatment))
         if perm_bool:
-            if i == 0: axs[0,i].set_title(r'Open/Close Left', fontsize=12,weight='bold', loc='left')
-            axs[0,i].set_title(f'[{freq_band[i]}-{freq_band[i+1]-1}] Hz', fontsize=12, loc='right')
+            if i == 0: 
+                axs[0,i].set_title(f'Open/Close Left', fontsize=12,weight='bold', loc='left')
+            if i == 2:
+                axs[0,i].text(0.995, 1.1, text_id, ha='right', va='top', transform = axs[0,i].transAxes, fontsize=11, 
+                              bbox=dict(facecolor='white', edgecolor='black', boxstyle='square,pad=0.1'))
+            axs[0,i].text(0.98, 0.97, f'[{freq_band[i]}-{freq_band[i+1]-1}] Hz', va='top', ha='right', transform=axs[0,i].transAxes, fontsize=12)
             p = STAT.ApproxPermutationTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, plot=True, ax=axs[0,i])
             p_left.append(p)
             labels.append(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (P)')
         if boot_bool:
+            axs[1,i].text(0.98, 0.97, f'[{freq_band[i]}-{freq_band[i+1]-1}] Hz', va='top', ha='right', transform=axs[1,i].transAxes, fontsize=12)
             p = STAT.BootstrapTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, nullHypothesisStatValue=0.0, plot=True, ax=axs[1,i])
             p_left.append(p)
             labels.append(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (B)')
@@ -389,14 +436,19 @@ if __name__ == '__main__':
         # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
         x_ = np.mean(x[:, :, STAT.custom_ticks[0] : STAT.custom_ticks[-1]], axis=2)
         # Transform PSDs to dB
-        x_ = EEG.convert_dB(x_)
+        #x_ = EEG.convert_dB(x_)
         r2_right.append(STAT.DifferenceOfR2(x_, isTreatment))
         if perm_bool:
-            if i == 0: axs[0,i].set_title(r'Open/Close Right', fontsize=12,weight='bold', loc='left')
-            axs[0,i].set_title(f'[{freq_band[i]}-{freq_band[i+1]-1}] Hz', fontsize=12, loc='right')
+            if i == 0: 
+                axs[0,i].set_title(f'Open/Close Right', fontsize=12,weight='bold', loc='left')
+            if i == 2:
+                axs[0,i].text(0.995, 1.1, text_id, ha='right', va='top', transform = axs[0,i].transAxes, fontsize=11, 
+                              bbox=dict(facecolor='white', edgecolor='black', boxstyle='square,pad=0.1'))
+            axs[0,i].text(0.98, 0.97, f'[{freq_band[i]}-{freq_band[i+1]-1}] Hz', va='top', ha='right', transform=axs[0,i].transAxes, fontsize=12)
             p = STAT.ApproxPermutationTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, plot=True, ax=axs[0,i])
             p_right.append(p)
         if boot_bool:
+            axs[1,i].text(0.98, 0.97, f'[{freq_band[i]}-{freq_band[i+1]-1}] Hz', va='top', ha='right', transform=axs[1,i].transAxes, fontsize=12)
             p = STAT.BootstrapTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, nullHypothesisStatValue=0.0, plot=True, ax=axs[1,i])
             p_right.append(p)
     plt.tight_layout()
@@ -408,7 +460,7 @@ if __name__ == '__main__':
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # PLOT p-values extracted by Statistical tests
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # This is a Left - Right view
+    # Left results ---------
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3.5), sharey=True)
     y_max = 0.5
     y_min = -0.5
@@ -434,15 +486,17 @@ if __name__ == '__main__':
     ax1.hlines(y, 0, x_values, colors='red', lw=1, alpha=0.25)
     ax1.set_xlabel(r'-log(p)')
     ax1.set_xlim(ax1.get_xlim()[::-1])  # Reverse the x-axis for left plot
-    ax1.set_xlim(right=0, left=6)
+    ax1.set_xlim(right=0, left=8)
     ax1.set_ylim(y_min, y_max)
     ax1.axvline(STAT.negP(0.05), color='black', lw=1, ls=':', alpha=0.5, label='95% C.L.')
     ax1.axvline(STAT.negP(0.01), color='darkviolet', lw=1, ls=':', alpha=0.5, label='99% C.L.')
     ax1.set_yticks(y)
     ax1.set_yticklabels(labels)
     ax1.legend(loc='upper left')
-    # Right results
-    #---------
+
+    ax1.text(1.25, 1.08, text_id, ha='right', va='top', transform = ax1.transAxes, fontsize=11, 
+                              bbox=dict(facecolor='white', edgecolor='black', boxstyle='square,pad=0.1'))
+    # Right results ---------
     x_values = []
     xUp_values = []
     xDown_values = []
@@ -459,7 +513,7 @@ if __name__ == '__main__':
         ax2.fill_betweenx([y[i]-deltay, y[i]+deltay], xDown_values[i], xUp_values[i], color='blue', alpha=0.3)
     ax2.hlines(y, 0, x_values, colors='blue', lw=1, alpha=0.25)
     ax2.set_xlabel(r'-log(p)')
-    ax2.set_xlim(left=0, right=6)
+    ax2.set_xlim(left=0, right=8)
     ax1.set_ylim(y_min, y_max)
     ax2.axvline(STAT.negP(0.05), color='black', lw=1, ls=':', alpha=0.5)
     ax2.axvline(STAT.negP(0.01), color='darkviolet', lw=1, ls=':', alpha=0.5)
@@ -469,6 +523,7 @@ if __name__ == '__main__':
     plt.savefig(f'{path_to_folder}/pVal_{resolution}_Hz.pdf', bbox_inches='tight')
     plt.show()
     
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # PLOT topoplots with r2
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -486,10 +541,13 @@ if __name__ == '__main__':
 
     for i in range(N):
         if i==0: 
-            PLOT.plot_topomap_L_R([axes[i,0],axes[i,1],axes[i,2]], RAW_SL, r2_left[i], r2_right[i], custom_cmap, (-1,1), 
+            PLOT.plot_topomap_L_R([axes[i,0],axes[i,1],axes[i,2]], RAW_SL, r2_left[i], r2_right[i], custom_cmap, (-0.3, 0.3), 
                                   [mask,mask_left,mask_right], [mask_params1,mask_params2], text=True)
+            
+            axes[i,2].text(0, 1, text_id, ha='left', va='top', transform = axes[i,2].transAxes, fontsize=11, 
+                              bbox=dict(facecolor='white', edgecolor='black', boxstyle='square,pad=0.1')) 
         else: 
-            PLOT.plot_topomap_L_R([axes[i,0],axes[i,1],axes[i,2]], RAW_SL, r2_left[i], r2_right[i], custom_cmap, (-1,1), 
+            PLOT.plot_topomap_L_R([axes[i,0],axes[i,1],axes[i,2]], RAW_SL, r2_left[i], r2_right[i], custom_cmap, (-0.3, 0.3), 
                                   [mask,mask_left,mask_right], [mask_params1,mask_params2], text=False)
         
         if p_left[1::2][i] < 0.05:
@@ -518,12 +576,7 @@ if __name__ == '__main__':
     isTreatment_list = [np.arange(x_list[0].shape[0]) < psds_left_rest.shape[0],  #(trial,)
                         np.arange(x_list[1].shape[0]) < psds_right_rest.shape[0]] #(trial,)
 
-    # List of channels to show plots for
-    chs = ['c4', 'c3']
-    # Find symmetric channel id
-    #ch_symm = EEG.find_ch_symmetry(ch_location=eeg_dict.ch_location, ch_list=[ch.lower()])[ch.lower()]
-    #ch_symm_idx = ch_set.find_labels(ch_symm)[0]
-
+    # List of channels to show plots for (comes from option -xray)
     for ch in chs:
         # Find channel id
         ch_idx = ch_set.find_labels(ch)[0]
@@ -566,7 +619,7 @@ if __name__ == '__main__':
             axsPSD[0].set_xlim(xlim)
             axsPSD[0].set_ylim(ylim)
             axsPSD[0].set_ylabel('[dB]', loc='top', fontsize=11)
-            axsPSD[0].text(xlim[0]+0.25, ylim[0] + (ylim[1]-ylim[0])*0.025, 'Rest Trials')
+            axsPSD[0].text(xlim[0]+0.25, ylim[0] + (ylim[1]-ylim[0])*0.025, f'Rest Trials ({mode})')
         
             # Lists to store information for each frequency band
             ys = []
@@ -579,7 +632,7 @@ if __name__ == '__main__':
                 start_idx = idx[0]
                 end_idx = idx[-1]
                 x_within_band = np.mean(x[:, :, start_idx:end_idx], axis=2) #(trial, ch)
-                x_within_band = EEG.convert_dB(x_within_band) # Transform PSDs to dB
+                #x_within_band = EEG.convert_dB(x_within_band) # Transform PSDs to dB
                 r_coeff = STAT.CalculateR(x=x_within_band, isTreatment=isTreatment)
                 r_coeffs.append(r_coeff)
                 ys.append(r_coeff[ [ch_idx] ])
@@ -588,15 +641,16 @@ if __name__ == '__main__':
                 mne.viz.plot_topomap(r_coeff, RAW_SL.info, ch_type='eeg', sensors=True, cmap=PLOT.simple_cmap, vlim=(-cmap_max,cmap_max), 
                                      mask=mask, mask_params=mask_params, show=False, axes=axsTopo[i])
                 
-                # Convert labels of trials into dummy variable (True/Rest = 1, False/Task = 0 by choice)
+                # Convert labels of trials into dummy variable (True/Rest = 0, False/Task = 1 by choice)
                 dummy = STAT.Dummy(isTreatment)
-                PLOT.plot_correlation_psd_groups(x=x_within_band[ :, [ch_idx] ], y=dummy, isTreatment=isTreatment, r=r_coeff[ [ch_idx] ], xlim=ylim, ax=axsCorr[i])
+                PLOT.plot_correlation_psd_groups(x=EEG.convert_dB(x_within_band[ :, [ch_idx] ]), y=dummy, isTreatment=isTreatment, r=r_coeff[ [ch_idx] ], xlim=ylim, ax=axsCorr[i])
                 
                 # Show frequency band (topoplot)
                 axsTopo[i].set_title(f'[{freq_band[i]}, {freq_band[i+1]-1}] Hz', fontsize=12)
                 
                 # Show frequency band (correlation)
-                axsCorr[i].text(ylim[-1] + np.abs(ylim[-1])*0.05, 1.05, f'[{freq_band[i]}, {freq_band[i+1]-1}] Hz', fontsize=12)
+                axsCorr[i].text(0.98, 0.95, f'[{freq_band[i]}, {freq_band[i+1]-1}] Hz', va='top', ha='right', transform=axsCorr[i].transAxes, fontsize=12)
+            
                 axsCorr[i].set_xlim(ylim)
                 if i != N-1: 
                     axsCorr[i].set_xticks([])
@@ -609,7 +663,7 @@ if __name__ == '__main__':
             axsPSD[1].set_xlim(xlim)
             axsPSD[1].set_ylim(ylim)
             axsPSD[1].set_ylabel('[dB]', loc='top', fontsize=11)
-            axsPSD[1].text(xlim[0]+0.25, ylim[0] + (ylim[1]-ylim[0])*0.025, 'Task Trials')
+            axsPSD[1].text(xlim[0]+0.25, ylim[0] + (ylim[1]-ylim[0])*0.025, f'Task Trials ({mode})')
 
             # Rest - Task PSD (mean) trials
             y_diff = [np.mean(i)-np.mean(j) for i,j in zip(y_rest, y_task)]
@@ -640,14 +694,16 @@ if __name__ == '__main__':
             #ax.set_ylim(-1,1)
 
             # Show channel (correlation)
-            axsCorr[0].text(ylim[0], 1.35, 'Channel', weight='bold', fontsize=12)
-            axsCorr[0].text(ylim[0] + np.abs(ylim[1]-ylim[0])*0.2, 1.35, f'{ch}',fontsize=12)
-            axsCorr[0].set_title(r'Coeff. r & r$^{2}$', fontsize=11, loc='right')
+            axsCorr[0].text(0, 1.1, f'Channel {ch}', weight='bold', va='top', ha='left', transform=axsCorr[0].transAxes, fontsize=12)
+            axsCorr[0].text(0.02, 0.95, f'{mode} trials', va='top', ha='left', transform=axsCorr[0].transAxes, fontsize=12)
+            #axsCorr[0].set_title(r'Coeff. r & r$^{2}$', fontsize=11, loc='right')
+            axsCorr[0].text(0.995, 1.14, text_id, ha='right', va='top', transform = axsCorr[0].transAxes, fontsize=11, 
+                             bbox=dict(facecolor='white', edgecolor='black', boxstyle='square, pad=0.1')) 
             
             # Show channel (PSD)
-            axsPSD[0].text(xlim[0], ylim[-1] + np.abs(ylim[-1])*0.05, f'Channel', weight='bold', fontsize=12)
-            axsPSD[0].text(xlim[0] + 5.5, ylim[-1] + np.abs(ylim[-1])*0.05, f'{ch}', fontsize=12)
-            axsPSD[0].set_title('Trial PSD', fontsize=11, loc='right')
+            axsPSD[0].text(0, 1.1, f'Channel {ch}', weight='bold', va='top', ha='left', transform=axsPSD[0].transAxes, fontsize=12)
+            axsPSD[0].text(0.995, 1.14, text_id, ha='right', va='top', transform = axsPSD[0].transAxes, fontsize=11, 
+                             bbox=dict(facecolor='white', edgecolor='black', boxstyle='square, pad=0.1')) 
             
             # Add color bar (topoplot)
             clim = dict(kind='value', lims=[-cmap_max,0,cmap_max])
@@ -657,10 +713,14 @@ if __name__ == '__main__':
             axsTopo[-1].axis('off')
             axsTopo[-1] = divider.append_axes(position='left', size='20%', pad=0.5)
             mne.viz.plot_brain_colorbar(axsTopo[-1], clim=clim, colormap=PLOT.simple_cmap, transparent=False, orientation='vertical', label=None)   
+            
+            axsTopo[-1].text(4, 1, text_id, ha='left', va='top', transform = axsTopo[-1].transAxes, fontsize=11, 
+                              bbox=dict(facecolor='white', edgecolor='black', boxstyle='square,pad=0.1')) 
             axsTopo[-1].text(4,  0.5, r'$r$ Coefficients', fontsize=12)
-            axsTopo[-1].text(4,  0.3, f'Channel', weight='bold', fontsize=12)
-            axsTopo[-1].text(10, 0.3, f'{ch}', fontsize=12)
+            axsTopo[-1].text(4,  0.3, f'Channel {ch}', weight='bold', fontsize=12)
             axsTopo[-1].text(4,  0.1, f'{mode} trials', fontsize=12)
+            axsTopo[-1].text(4,  -0.099, f'Target (O)', color='lime', fontsize=12)
+            axsTopo[-1].text(4,  -0.1, f'Target (O)', color='black', fontsize=12)
             
             figCorr.subplots_adjust(hspace=0)
             figPSD.subplots_adjust(hspace=0)
