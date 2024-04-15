@@ -1647,10 +1647,10 @@ class Plotting():
 
         # Add optional text to colorbar axis
         if text:
-            ax[2].text(-0.2, 0.73, r'$r^{2}$ Coefficients', color='black')
-            ax[2].text(-0.2, 0.60, 'Target (O)',            color='lime')
-            ax[2].text(-0.2, 0.59, 'Target (O)',            color='black')
-            ax[2].text(-0.2, 0.45, 'Interpolated (X)',      color='black')
+            ax[2].text(0, 0.73, r'signed-r$^{2}$ Coefficients', color='black')
+            ax[2].text(0, 0.60, 'Target (O)',            color='lime')
+            ax[2].text(0, 0.59, 'Target (O)',            color='black')
+            ax[2].text(0, 0.45, 'Interpolated (X)',      color='black')
             #ax[2].text(-0.2, 0.30, '',      color='black')
 
         # Note: Some lines seem to repeat with slight modifications (e.g., mask parameters). It's assumed these are intentional
@@ -1830,12 +1830,12 @@ class Plotting():
             ax.plot(x_axis, y_axis, color='grey')
             
             # Add text window with r and r2 parameters
-            ax.text(xlim[-1] - np.abs(xlim[-1])*0.65, 0.45, f'r = {round(r[0], 3)}\nr$^{2}$ = {round(r[0]*abs(r[0]), 3)}')
+            ax.text(0.98, 0.45, f'r = {round(r[0], 3)}\nsigned-r$^{2}$ = {round(r[0]*abs(r[0]), 3)}', va='top', ha='right', transform=ax.transAxes, fontsize=11)
             
             ax.set_ylim(-0.3, 1.3)
             ax.set_xlabel('PSD [dB]', loc='right', fontsize=11)
             ax.set_yticks([0,1])
-            ax.set_yticklabels(['Task', 'Rest'], rotation=0)
+            ax.set_yticklabels(['Rest', 'Task'], rotation=0)
             
         else: 
             # Plotting without any specified ax
