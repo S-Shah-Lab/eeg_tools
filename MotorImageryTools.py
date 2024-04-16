@@ -1036,8 +1036,6 @@ class Stats:
         CalculateR2
         Transform
         DifferenceOfSumsR2
-        DifferenceOfR2
-        SimpleDifferenceOfR2
         FindSymmetric
         Shuffle
         ApproxPermutationTest
@@ -1216,74 +1214,6 @@ class Stats:
         x2 = x[isIpsilat]
         # Compute and return the difference between the sums for ipsilateral - contralateral electrodes
         return  np.sum(x2) - np.sum(x1)
-
-
-    def DifferenceOfR2(self, x=None, isTreatment=None):
-        """
-        Calculates the difference in R² values between ipsilateral - contralateral electrodes for topoplot visualization.
-
-        Args:
-            x: Data array with shape (trial, ch, bin)
-            isTreatment: Boolean array indicating treatment group membership for each element in `x`.
-
-        Returns:
-            A numpy array of R² differences suitable for plotting on a topoplot, emphasizing hemispheric differences in brain activity.
-
-        Note:
-            - The function assumes that electrode symmetry and hemisphere information are properly defined in `self.isContralat` and
-              that methods exist for transforming data (`Transform`), finding symmetric electrodes (`FindSymmetric`), and identifying
-              electrode indices (`ch_set.find_labels` and `ch_set.get_labels`).
-            - The output array `r2` is initialized to zeros and filled with the computed R² differences for electrodes identified as
-              ipsilateral, with the contralateral differences being directly subtracted.
-        """
-        # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch) -> (ch,)
-        x = self.Transform(x, isTreatment)
-        # Sum the averages for contralateral electrodes
-        x1 = x[self.isContralat]
-        # Identify and sum the averages for ipsilateral electrodes
-        isIpsilat = self.FindSymmetric(isContralat=self.isContralat)
-        x2 = x[isIpsilat]
-        # Initialize R² difference array
-        r2 = np.zeros(len(self.ch_names))
-        # Compute R² differences for matched ipsilateral - contralateral electrodes
-        for i, j in zip(self.ch_set.find_labels(np.array(self.ch_set.get_labels())[self.isContralat]), range(len(self.isContralat))):
-            r2[i] =  x2[j] - x1[j]
-        # Return the transformed data
-        return x
-
-
-    def SimpleDifferenceOfR2(self, x=None, isTreatment=None):
-        """
-        Calculates the difference in R² values between ipsilateral - contralateral electrodes for topoplot visualization. No averaging happening over frequency band needed, also the data is assumed to be in dB already.
-
-        Args:
-            x: Data array with shape (trial, ch)
-            isTreatment: Boolean array indicating treatment group membership for each element in `x`.
-
-        Returns:
-            A numpy array of R² differences suitable for plotting on a topoplot, emphasizing hemispheric differences in brain activity.
-
-        Note:
-            - The function assumes that electrode symmetry and hemisphere information are properly defined in `self.isContralat` and
-              that methods exist for transforming data (`Transform`), finding symmetric electrodes (`FindSymmetric`), and identifying
-              electrode indices (`ch_set.find_labels` and `ch_set.get_labels`).
-            - The output array `r2` is initialized to zeros and filled with the computed R² differences for electrodes identified as
-              contralateral, with the ipsilateral differences being directly subtracted.
-        """
-        # Apply specified transformation (e.g., 'eta2' or 'r2') to the data (trial, ch) -> (ch,)
-        x = self.Transform(x, isTreatment)
-        # Sum the averages for contralateral electrodes
-        x1 = x[self.isContralat]
-        # Identify and sum the averages for ipsilateral electrodes
-        isIpsilat = self.FindSymmetric(isContralat=self.isContralat)
-        x2 = x[isIpsilat]
-        # Initialize R² difference array
-        r2 = np.zeros(len(self.ch_names))
-        # Compute R² differences for matched ipsilateral - contralateral electrodes
-        for i, j in zip(self.ch_set.find_labels(np.array(self.ch_set.get_labels())[self.isContralat]), range(len(self.isContralat))):
-            r2[i] =  x2[j] - x1[j]
-        # Return the transformed data
-        return x
 
 
     def FindSymmetric(self, isContralat=None):
@@ -1606,7 +1536,7 @@ class Plotting():
                 else: plt.text(text_pos, ylim[1] - delta, band, horizontalalignment='center', fontsize=fontsize)
 
 
-    def plot_topomap_L_R(self, ax=None, RAW=None, dataL=None, dataR=None, cmap='viridis', vlim=None, masks=None, mask_params=None, text=None):
+    def plot_topomap_L_R(self, ax=None, RAW=None, dataL=None, dataR=None, cmap='viridis', vlim=None, masks=None, mask_params=None):
         """
         Plots left and right EEG topomaps using MNE's plot_topomap function.
 
@@ -1619,7 +1549,6 @@ class Plotting():
             vlim (tuple of float, optional): Value limits for the colormap.
             masks (list of numpy.ndarray): List of masks to apply to the topomap data.
             mask_params (list of dict): List of dictionaries specifying parameters for each mask.
-            text (bool, optional): Flag to indicate whether additional text labels should be added to the colorbar axis.
         """
 
         # Plot left hemisphere topomap
@@ -1630,29 +1559,22 @@ class Plotting():
 
         # Plot right hemisphere topomap
         im, cm = mne.viz.plot_topomap(dataR, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim,
-                                      mask=masks[0], mask_params=mask_params[0], show=False, axes=ax[1])
+                                      mask=masks[0], mask_params=mask_params[0], show=False, axes=ax[2])
         im, cm = mne.viz.plot_topomap(dataR, RAW.info, ch_type='eeg', sensors=True, cmap=cmap, vlim=vlim,
-                                      mask=masks[2], mask_params=mask_params[1], show=False, axes=ax[1])
+                                      mask=masks[2], mask_params=mask_params[1], show=False, axes=ax[2])
 
         # Prepare colorbar axis
         clim = dict(kind='value', lims=[vlim[0], 0, vlim[1]])
-        divider = make_axes_locatable(ax[2])
-        ax[2].set_yticks([])
-        ax[2].set_xticks([])
-        ax[2].axis('off')
-        cax = divider.append_axes(position='left', size='20%', pad=0.5)
+        divider = make_axes_locatable(ax[1])
+        ax[1].set_yticks([])
+        ax[1].set_xticks([])
+        ax[1].axis('off')
+        cax = divider.append_axes(position='right', size='25%', pad=-0.1)
 
         # Plot colorbar
-        mne.viz.plot_brain_colorbar(cax, clim=clim, colormap=cmap, transparent=False, orientation='vertical', label=None)
-
-        # Add optional text to colorbar axis
-        if text:
-            ax[2].text(0, 0.73, r'signed-r$^{2}$ Coefficients', color='black')
-            ax[2].text(0, 0.60, 'Target (O)',            color='lime')
-            ax[2].text(0, 0.59, 'Target (O)',            color='black')
-            ax[2].text(0, 0.45, 'Interpolated (X)',      color='black')
-            #ax[2].text(-0.2, 0.30, '',      color='black')
-
+        cbar = mne.viz.plot_brain_colorbar(cax, clim=clim, colormap=cmap, transparent=False, orientation='vertical', label=None)
+        cbar.set_ticks([vlim[1]])  # Set ticks to only the top value
+        
         # Note: Some lines seem to repeat with slight modifications (e.g., mask parameters). It's assumed these are intentional
         # for demonstration purposes. Ensure this aligns with your actual processing needs.
 
