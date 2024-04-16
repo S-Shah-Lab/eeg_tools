@@ -21,6 +21,7 @@ from BCI2000Tools.Electrodes import *
 from BCI2000Tools.Plotting import *
 import mne 
 import matplotlib.pyplot as plt
+import matplotlib 
 from matplotlib.colors import LinearSegmentedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyprep.prep_pipeline import PrepPipeline, NoisyChannels
@@ -397,8 +398,9 @@ if __name__ == '__main__':
         # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
         x_ = np.mean(x[:, :, STAT.custom_ticks[0] : STAT.custom_ticks[-1]], axis=2)
         # Transform PSDs to dB
-        #x_ = EEG.convert_dB(x_)
-        r2_left.append(STAT.DifferenceOfR2(x_, isTreatment))
+        x_ = EEG.convert_dB(x_)
+        # Calculate r2
+        r2_left.append(STAT.Transform(x_, isTreatment))
         if perm_bool:
             if i == 0: 
                 axs[0,i].set_title(f'Open/Close Left', fontsize=12,weight='bold', loc='left')
@@ -436,8 +438,9 @@ if __name__ == '__main__':
         # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
         x_ = np.mean(x[:, :, STAT.custom_ticks[0] : STAT.custom_ticks[-1]], axis=2)
         # Transform PSDs to dB
-        #x_ = EEG.convert_dB(x_)
-        r2_right.append(STAT.DifferenceOfR2(x_, isTreatment))
+        x_ = EEG.convert_dB(x_)
+        # Calculate r2
+        r2_right.append(STAT.Transform(x_, isTreatment))
         if perm_bool:
             if i == 0: 
                 axs[0,i].set_title(f'Open/Close Right', fontsize=12,weight='bold', loc='left')
@@ -519,9 +522,9 @@ if __name__ == '__main__':
     ax2.axvline(STAT.negP(0.01), color='darkviolet', lw=1, ls=':', alpha=0.5)
     #--------- 
     plt.subplots_adjust(wspace=0)  # Adjust space between subplots
-    plt.savefig(f'{path_to_folder}/pVal_{resolution}_Hz.png', bbox_inches='tight')
-    plt.savefig(f'{path_to_folder}/pVal_{resolution}_Hz.pdf', bbox_inches='tight')
-    plt.show()
+    fig.savefig(f'{path_to_folder}/pVal_{resolution}_Hz.png', bbox_inches='tight')
+    fig.savefig(f'{path_to_folder}/pVal_{resolution}_Hz.pdf', bbox_inches='tight')
+    #plt.show()
     
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -534,36 +537,51 @@ if __name__ == '__main__':
     mask_right = np.array([True if x in isLeft_ch else False for x in ch_setSLAP.get_labels()])
     mask_left = np.array([True if x in isRight_ch else False for x in ch_setSLAP.get_labels()])
     mask_params2 = dict(marker='o', markersize=5, markerfacecolor='lime', alpha=0.75)
+    
     # Plot
-    fig, axes = plt.subplots(nrows=N, ncols=3, figsize=(6, int(2*N)))
+    fig = plt.figure(figsize=(6, int(2*N)))
+    gs = matplotlib.gridspec.GridSpec(N, 3, width_ratios=[2, 0.15, 2])
     # Make colormap for topoplots
     custom_cmap = PLOT.make_simple_cmap('blue', 'white', 'red')
 
     for i in range(N):
-        if i==0: 
-            PLOT.plot_topomap_L_R([axes[i,0],axes[i,1],axes[i,2]], RAW_SL, r2_left[i], r2_right[i], custom_cmap, (-0.3, 0.3), 
-                                  [mask,mask_left,mask_right], [mask_params1,mask_params2], text=True)
-            
-            axes[i,2].text(0, 1, text_id, ha='left', va='top', transform = axes[i,2].transAxes, fontsize=11, 
-                              bbox=dict(facecolor='white', edgecolor='black', boxstyle='square,pad=0.1')) 
-        else: 
-            PLOT.plot_topomap_L_R([axes[i,0],axes[i,1],axes[i,2]], RAW_SL, r2_left[i], r2_right[i], custom_cmap, (-0.3, 0.3), 
-                                  [mask,mask_left,mask_right], [mask_params1,mask_params2], text=False)
+        # Create subplots in each row
+        axes1 = fig.add_subplot(gs[i, 0])  # First  col
+        axes2 = fig.add_subplot(gs[i, 1])  # Second col
+        axes3 = fig.add_subplot(gs[i, 2])  # Third  col
         
-        if p_left[1::2][i] < 0.05:
-            axes[i,0].set_title(f'*{freq_band[i]}-{freq_band[i+1]-1} Hz (Left)', fontsize=12)
-        else: 
-            axes[i,0].set_title(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (Left)', fontsize=12)
+        if i==0: 
+            axes2.text(-2.5, 1.35, r'signed-r$^{2}$ Coefficients', va='bottom', ha='left', transform=axes2.transAxes, color='black')
+            axes2.text(-0.5, 1.2, 'Target (O)', va='bottom', ha='right', transform=axes2.transAxes, color='lime', fontsize=12)
+            axes2.text(-0.5, 1.2, 'Target (O)', va='bottom', ha='right', transform=axes2.transAxes, color='black', fontsize=12)
+            axes2.text(1.5, 1.2, 'Interpolated (X)', va='bottom', ha='left', transform=axes2.transAxes, color='black', fontsize=12)
+        
+        #if i==0: 
+        #    PLOT.plot_topomap_L_R([axes1, axes3, axes2], RAW_SL, r2_left[i], r2_right[i], custom_cmap, (-0.3, 0.3), 
+        #                          [mask,mask_left,mask_right], [mask_params1,mask_params2], text=True)
             
-        if p_right[1::2][i] < 0.05:
-            axes[i,1].set_title(f'*{freq_band[i]}-{freq_band[i+1]-1} Hz (Right)', fontsize=12)
-        else: 
-            axes[i,1].set_title(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (Right)', fontsize=12)
+        #    axes[i,2].text(0, 1, text_id, ha='left', va='top', transform = axes[i,2].transAxes, fontsize=11, 
+        #                      bbox=dict(facecolor='white', edgecolor='black', boxstyle='square,pad=0.1')) 
+        #else: 
+        PLOT.plot_topomap_L_R([axes1, axes2, axes3], RAW_SL, r2_left[i], r2_right[i], custom_cmap, (-0.3, 0.3), 
+                              [mask,mask_left,mask_right], [mask_params1,mask_params2])
+        
+        axes1.set_title(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (Left)', fontsize=12)
+        #if p_left[1::2][i] < 0.05:
+        #    axes[i,0].set_title(f'*{freq_band[i]}-{freq_band[i+1]-1} Hz (Left)', fontsize=12)
+        #else: 
+        #    axes[i,0].set_title(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (Left)', fontsize=12)
+        
+        axes3.set_title(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (Right)', fontsize=12)
+        #if p_right[1::2][i] < 0.05:
+        #    axes[i,1].set_title(f'*{freq_band[i]}-{freq_band[i+1]-1} Hz (Right)', fontsize=12)
+        #else: 
+        #    axes[i,1].set_title(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (Right)', fontsize=12)
 
-    fig.tight_layout()
-    plt.savefig(f'{path_to_folder}/topoR2_{resolution}_Hz.png')
-    plt.savefig(f'{path_to_folder}/topoR2_{resolution}_Hz.pdf')
-    plt.show()
+    fig.subplots_adjust(wspace=0)
+    fig.savefig(f'{path_to_folder}/topoR2_{resolution}_Hz.png')
+    fig.savefig(f'{path_to_folder}/topoR2_{resolution}_Hz.pdf')
+    #plt.show()
 
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -595,7 +613,7 @@ if __name__ == '__main__':
             # Frequency bands mid points
             x_band.append(freq_band[i] + (freq_band[i+1] - freq_band[i]) / 2)
             # Frequency bands width
-            w_band.append( freq_band[i+1] - freq_band[i])
+            w_band.append(freq_band[i+1] - freq_band[i])
             
         # Generate plots for Left and Right trials
         for k, mode in enumerate(['Left', 'Right']):
@@ -612,7 +630,7 @@ if __name__ == '__main__':
             xs, y_rest, ws = PLOT.plot_psd_at_channel(x=x[ :, [ch_idx], : ][ isTreatment], color='navy', ax=axsPSD[0], freq_band=freq_band, bins=STAT.bins)
             # Use Rest PSD trials to define y limits in dB
             ylim = (int(np.min(y_rest) - np.abs(np.min(y_rest)) - 15), 
-                    int(np.max(y_rest) + np.abs(np.max(y_rest)) + 15))\
+                    int(np.max(y_rest) + np.abs(np.max(y_rest)) + 15))
             # Plot (Rest PSD trials)
             PLOT.plot_frequency_bands(ax=axsPSD[0], ylim=ylim, fontsize=10)
             axsPSD[0].set_xticks([])
@@ -632,7 +650,7 @@ if __name__ == '__main__':
                 start_idx = idx[0]
                 end_idx = idx[-1]
                 x_within_band = np.mean(x[:, :, start_idx:end_idx], axis=2) #(trial, ch)
-                #x_within_band = EEG.convert_dB(x_within_band) # Transform PSDs to dB
+                x_within_band = EEG.convert_dB(x_within_band) # Transform PSDs to dB
                 r_coeff = STAT.CalculateR(x=x_within_band, isTreatment=isTreatment)
                 r_coeffs.append(r_coeff)
                 ys.append(r_coeff[ [ch_idx] ])
@@ -643,7 +661,7 @@ if __name__ == '__main__':
                 
                 # Convert labels of trials into dummy variable (True/Rest = 0, False/Task = 1 by choice)
                 dummy = STAT.Dummy(isTreatment)
-                PLOT.plot_correlation_psd_groups(x=EEG.convert_dB(x_within_band[ :, [ch_idx] ]), y=dummy, isTreatment=isTreatment, r=r_coeff[ [ch_idx] ], xlim=ylim, ax=axsCorr[i])
+                PLOT.plot_correlation_psd_groups(x=x_within_band[ :, [ch_idx] ], y=dummy, isTreatment=isTreatment, r=r_coeff[ [ch_idx] ], xlim=ylim, ax=axsCorr[i])
                 
                 # Show frequency band (topoplot)
                 axsTopo[i].set_title(f'[{freq_band[i]}, {freq_band[i+1]-1}] Hz', fontsize=12)
@@ -737,3 +755,109 @@ if __name__ == '__main__':
             figTopo.show()
             figPSD.show()
             figCorr.show()
+
+
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # PLOT channel PSDs
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    chs = ['p3', 'c3', 'c4', 'p4']
+
+    for ch in chs: 
+        # Find channel id
+        ch_idx = ch_set.find_labels(ch)[0]
+        
+        # xlim to use in plots based on frequency range used
+        xlim = [STAT.bins[0], STAT.bins[-1]]
+        
+        fig = plt.figure(figsize=(5, 7))
+        # Define the grid layout
+        gs = matplotlib.gridspec.GridSpec(2, 1, height_ratios=[3, 1])
+        # Left and Right (Task)
+        x_left  = psds_left[ :, ch_idx, :]
+        x_right = psds_right[:, ch_idx, :]
+        # Left and Right (Rest)
+        x_left_rest  = psds_left_rest[ :, ch_idx, :]
+        x_right_rest = psds_right_rest[:, ch_idx, :]
+        # All (Rest)
+        x_rest  = np.vstack([x_left_rest, x_right_rest])
+        
+        def mean_and_se(x=None, axis=0):
+            mean = np.mean(x, axis=axis)
+            std =  np.std( x, axis=axis)
+            se = std / np.sqrt(x.shape[axis])
+            return mean, se
+        
+        ax1 = fig.add_subplot(gs[0, 0])
+        
+        mean, se = mean_and_se(x=EEG.convert_dB(x_left), axis=0)
+        ax1.fill_between(STAT.bins, mean-se, mean+se, color='blue', alpha=0.5)
+        ax1.plot(STAT.bins, mean, color='blue', label="Move Left", alpha=1)
+        
+        mean, se = mean_and_se(x=EEG.convert_dB(x_left_rest), axis=0)
+        ax1.fill_between(STAT.bins, mean-se, mean+se, color='dodgerblue', alpha=0.25)
+        ax1.plot(STAT.bins, mean, color='dodgerblue', label="Rest Left", alpha=0.35)
+
+        mean, se = mean_and_se(x=EEG.convert_dB(x_right), axis=0)
+        ax1.fill_between(STAT.bins, mean-se, mean+se, color='red', alpha=0.5)
+        ax1.plot(STAT.bins, mean, color='red', label="Move Right", alpha=1)
+        
+        mean, se = mean_and_se(x=EEG.convert_dB(x_right_rest), axis=0)
+        ax1.fill_between(STAT.bins, mean-se, mean+se, color='magenta', alpha=0.25)
+        ax1.plot(STAT.bins, mean, color='magenta', label="Rest Right", alpha=0.35)
+        
+        #mean, se = mean_and_se(x=x_rest, axis=0)
+        #ax1.fill_between(STAT.bins, EEG.convert_dB(mean-se), EEG.convert_dB(mean+se), color='springgreen', alpha=0.5)
+        #ax1.plot(STAT.bins, EEG.convert_dB(mean), color='green', label="Rest", alpha=0.75)
+        #mean, se = mean_and_se(x=EEG.convert_dB(x_rest), axis=0)
+        #ax1.fill_between(STAT.bins, mean-se, mean+se, color='springgreen', alpha=0.5)
+        #ax1.plot(STAT.bins, mean, color='green', label="Rest", alpha=0.75)
+        
+        ax1.set_xlim(xlim[0],xlim[1])
+        ax1.set_xscale('log')
+        for i in [2, 4, 6, 8, 10, 20, 30]:
+            ax1.axvline(i, lw=1, ls=':', color='grey')
+        for i in [-10, -5, 0, 5, 10, 20]:
+            ax1.axhline(i, lw=1, ls=':', color='grey')
+        ax1.legend(loc='lower left')
+        ax1.set_xticks([])    
+        ax1.set_ylabel('[dB]', loc='top')
+        ax1.text(0, 1.05, f'Channel {ch}', weight='bold', va='top', ha='left', transform=ax1.transAxes, fontsize=12)
+        
+        ax2 = fig.add_subplot(gs[1, 0])
+
+        x = np.vstack([x_left_rest, x_left])
+        isTreatment = np.arange(x.shape[0]) < x_left_rest.shape[0]
+
+        ax2.plot(STAT.bins, STAT.CalculateR2(EEG.convert_dB(x), isTreatment, signed=False), color='blue', label='Left')
+        
+        x = np.vstack([x_right_rest, x_right])
+        isTreatment = np.arange(x.shape[0]) < x_right_rest.shape[0]
+        ax2.plot(STAT.bins, STAT.CalculateR2(EEG.convert_dB(x), isTreatment, signed=False), color='red', label='Right')
+        
+        ax2.set_xlim(xlim[0],xlim[1])
+        ax2.set_ylim(0,0.8)
+        ax2.set_xscale('log')
+        for i in [2, 4, 6, 8, 10, 20, 30]:
+            ax2.axvline(i, lw=1, ls=':', color='grey')
+        for i in [0.2, 0.4, 0.6, 0.8]:
+            ax2.axhline(i, lw=1, ls=':', color='grey')
+        ax2.legend(loc='upper left')
+        ax2.set_xlabel('Frequency [Hz]', loc='right')
+        ax2.set_ylabel(r'R$^{2}$')
+        
+        custom_ticks = [2, 4, 6, 8, 10, 20, 30, 40]
+        # Set the ticks on the x-axis
+        ax2.set_xticks(custom_ticks)  # Set custom ticks
+        ax2.set_xticklabels(custom_ticks)  # Set labels as the same values
+        
+        custom_ticks = [0, 0.2, 0.4, 0.6]
+        # Set the ticks on the x-axis
+        ax2.set_yticks(custom_ticks)  # Set custom ticks
+        ax2.set_yticklabels(custom_ticks)  # Set labels as the same values
+        
+        #ax1.text(0.995, 1.11, text_id, ha='right', va='top', transform = ax1.transAxes, fontsize=11, 
+        #                     bbox=dict(facecolor='white', edgecolor='black', boxstyle='square, pad=0.1'))    
+        fig.subplots_adjust(hspace=0)
+        fig.savefig(f'{path_to_folder}/{ch}_PSDs_{resolution}_Hz.png', bbox_inches='tight')
+        fig.savefig(f'{path_to_folder}/{ch}_PSDs_{resolution}_Hz.pdf', bbox_inches='tight')
+        plt.show()
