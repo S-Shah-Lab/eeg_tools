@@ -1514,7 +1514,7 @@ class Plotting():
                 else: plt.text(y[0], y[1], ch)
 
 
-    def plot_frequency_bands(self, ax=None, ylim=None, fontsize=12):
+    def plot_frequency_bands(self, ax=None, ylim=None, fontsize=12, fraction=0.13):
         """
         Adds frequency band annotations to a plot.
 
@@ -1531,7 +1531,7 @@ class Plotting():
             else: plt.axvline(x=freq, color='grey', linestyle='--', linewidth=1, alpha=0.5)
             # Place text label if ylim is provided
             if ylim:
-                delta = abs(ylim[1] - ylim[0]) * 0.13  # Calculate vertical position for text
+                delta = abs(ylim[1] - ylim[0]) * fraction  # Calculate vertical position for text
                 if ax: ax.text(text_pos, ylim[1] - delta, band, horizontalalignment='center', fontsize=fontsize)
                 else: plt.text(text_pos, ylim[1] - delta, band, horizontalalignment='center', fontsize=fontsize)
 
