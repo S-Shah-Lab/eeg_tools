@@ -92,7 +92,7 @@ class generate_pdf:
 		# Break down the page into 20 units
 		h_ = self.page_height / 20
 
-		# Create the first section, 2 unit from the top
+		# Create the boundary between HEADER and UPPER SECTION, 2 unit from the top
 		# H line
 		gap_from_top = 2 * h_
 		#self.draw_hline(x1=self.top_left[0], x2=self.top_right[0], y=self.move_down_by(self.top_left[1], gap_from_top), color=colors.grey)
@@ -103,7 +103,7 @@ class generate_pdf:
 		self.show_key_point('I', x=self.move_right_by(self.page_width/2, self.top_left[0]), y=self.top_right[1],                                 show=False)
 		self.show_key_point('J', x=self.move_right_by(self.page_width/2, self.top_left[0]), y=self.move_down_by(self.top_left[1], gap_from_top), show=False)
 
-		# Create the second section, 11 unit from the top
+		# Create the boundary between UPPER SECTION and LOWER SECTION, 11 unit from the top
 		# H line
 		gap_from_top = 11 * h_
 		#self.draw_hline(x1=self.top_left[0], x2=self.top_right[0], y=self.move_down_by(top_left[1], gap_from_top), color=colors.grey)
@@ -112,11 +112,12 @@ class generate_pdf:
 		self.show_key_point('K', x=self.move_right_by(self.page_width/2, self.top_left[0]), y=self.move_down_by(self.top_left[1], gap_from_top), show=False)
 		self.show_key_point('L', x=self.move_right_by(self.page_width/2, self.top_left[0]), y=self.bottom_right[1],                              show=False)
 
+		# Mid line 
 		# V line
 		#self.draw_vline(self.c, x=self.move_right_by(self.xmid, self.top_left[0]), y1=self.top_right[1], y2=self.bottom_right[1], color=colors.red)
 
 
-		# Write the header with subject and measurement information
+		# Write the HEADER with subject and measurement information
 		y0 = 15
 		dx = 10
 		dy = 15
@@ -135,7 +136,8 @@ class generate_pdf:
 		self.write_text(['Condition: ',            f'{self.condition} '],                       self.xmid+dx, self.move_down_by(self.dict_alph['I'][1], y0 + 2*dy), font_size=font_size, bold_flags=[False, True], align='left')
 		self.write_text(['Montage (Resolution): ', f'{self.montage_name} ({self.resolution} Hz)'], self.xmid+dx, self.move_down_by(self.dict_alph['I'][1], y0 + 3*dy), font_size=font_size, bold_flags=[False, True], align='left')
 
-		# Import r2 topoplots 
+
+		# Import r2 topoplots to the UPPER SECTION
 		dy = 5
 		height = self.move_down_by(self.dict_alph['E'][1], dy) - self.dict_alph['G'][1]
 		width = self.image_ratio(f'{self.plot_folder}topoR2_{self.resolution}_Hz.png', new_height=height)
@@ -144,25 +146,29 @@ class generate_pdf:
 		image_path = f'{self.plot_folder}topoR2_{self.resolution}_Hz.svg'
 		self.draw_svg_image(image_path, x=x_left, y=self.move_up_by(self.dict_alph['G'][1], 20), width=None, height=height)
 
-		# Import p-val for left hand
+		# Import p-val for left hand to the UPPER SECTION
 		width = self.image_ratio(f'{plot_folder}pVal_left_{self.resolution}_Hz.png', new_height=height)
 		image_path = f'{plot_folder}pVal_left_1_Hz.svg'
 		self.draw_svg_image(image_path, x=x_left - width, y=self.dict_alph['K'][1], width=width, height=None)
 
-		# Import p-val for right hand
+		# Import p-val for right hand to the UPPER SECTION
 		width = self.image_ratio(f'{plot_folder}pVal_right_{self.resolution}_Hz.png', new_height=height)
 		image_path = f'{plot_folder}pVal_right_{self.resolution}_Hz.svg'
 		self.draw_svg_image(image_path, x=x_right, y=self.dict_alph['K'][1], width=width, height=None)
 
-		# Import c3 psds
+
+
+		# Import c3 psds to the LOWER SECTION
 		image_path = f'{plot_folder}c3_PSDs_{self.resolution}_Hz.svg'
 		height = self.dict_alph['G'][1] - self.dict_alph['D'][1]
 		self.draw_svg_image(image_path, x=self.move_right_by(self.dict_alph['D'][0], 15), y=self.move_up_by(self.dict_alph['L'][1], 5), width=None, height=height)
 
-		# Import c4 psds
+		# Import c4 psds to the LOWER SECTION
 		image_path = f'{plot_folder}c4_PSDs_{self.resolution}_Hz.svg'
 		height = self.dict_alph['G'][1] - self.dict_alph['D'][1]
 		self.draw_svg_image(image_path, x=self.move_right_by(self.dict_alph['L'][0], 15), y=self.move_up_by(self.dict_alph['L'][1], 5), width=None, height=height)
+
+
 
 		# Save the canvas
 		self.c.save()
