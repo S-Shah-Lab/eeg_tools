@@ -17,18 +17,18 @@ This folder contains a collection of scripts, libraries, and files used in the m
 - [Licence](#license)
 
 ## Requirements
-## Libraries
-## Supporting Files
+### Libraries
+### Supporting Files
 
 
 ## Motor Imagery
-## Paradigm
+### Paradigm
 
 
 ## Usage
-Pre-processing
-Statistical Tests
-Plots
+### Pre-processing
+### Statistical Tests
+### Plots
 
 
 ## PDF Report
