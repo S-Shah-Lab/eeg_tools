@@ -8,8 +8,6 @@ import xml.etree.ElementTree as ET
 import datetime
 from datetime import date
 from PIL import Image
-from PyPDF2 import PdfReader
-
 
 class generate_pdf:
 	def __init__(self, plot_folder, montage_name, resolution):
