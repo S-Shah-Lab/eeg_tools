@@ -32,10 +32,10 @@ from pyprep.prep_pipeline import PrepPipeline, NoisyChannels
 import eeg_dict # Contains dictionaries and libraries for electrodes locations 
 import MotorImageryTools as mi # Contains tools for eeg and motor imagery
 
-import plot_style
-plot_style.set_plot_style()
+import PlotStyle
+PlotStyle.set_plot_style()
 
-import pdf_report
+import PdfReport
 
 
 if __name__ == '__main__':
@@ -946,7 +946,7 @@ if __name__ == '__main__':
 
         montage_name = ' '.join(montage_type.split('_'))
 
-        pdf_report.generate_pdf(plot_folder, montage_name, resolution)
+        PdfReport.generate_pdf(plot_folder, montage_name, resolution)
 
     else:
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -956,4 +956,4 @@ if __name__ == '__main__':
 
         montage_name = ' '.join(montage_type.split('_'))
 
-        pdf_report.generate_pdf(plot_folder, montage_name, resolution)
+        PdfReport.generate_pdf(plot_folder, montage_name, resolution)
