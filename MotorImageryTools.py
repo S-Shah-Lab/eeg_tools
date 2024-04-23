@@ -59,6 +59,7 @@ class EEG():
         interpolate
         make_epochs
         make_psd
+        epochs_to_psd
         convert_dB
     """
 
@@ -987,6 +988,57 @@ class EEG():
             if verbose: print(f"Aggregate epoch-wise: (ch, bins) = {psd_.shape}")
             
         return psd_
+
+
+    def epochs_to_psd(self, RAW=None, fs=None, event_dict=None, label=None, events_from_annot=None, tmin=None, tmax=None, fmin=None, fmax=None, resolution=None, secPerSegment=None, secOverlap=None, nSkip=[]):
+        """
+        Generate epochs and psds based on pre-generated annotations
+
+        Args: 
+            RAW (mne.io.Raw): Raw object containing annotations and EEG signal.
+            fs (float): EEG sampling frequency.
+            event_dict (dict): Dictionary with annotation names as keys and event id as values.
+            label (str): Initial part of labels to assign to each epoch.
+            events_from_annot (numpy ndarray): Array containing [duration in samples, /, event id] for all annotations.
+            tmin (float): Initial time of an epoch in seconds.
+            tmax (float): Final time of an epoch in seconds. tmax - tmin = Length of an epoch in seconds.
+            fmin (float): Min frequency to be considered in PSDs.
+            fmax (float): Max frequency to be consdiered in PSDs.
+            resolution (float): Bin width in frequency space. 
+            secPerSegment (float): Length of segments in PSDs Welch method in seconds.
+            secOverlap (float): Length of overlap between segments in PSDs Welch method in seconds.
+            nSkip (list): List of Epochs within a trial to skip. E.g. [0,3,4]
+
+        Returns: 
+            numpy array: Return the PSDs associated to a specific trial.
+        """
+        # Generate all things
+        psds_ = []
+        for i in range(1,9):
+            if i not in nSkip: 
+                try:
+                    # Generate Epochs
+                    epochs_ = self.make_epochs(RAW, 
+                                               tmin=tmin, 
+                                               tmax=tmax,  
+                                               event_id=event_dict[label+f'{i}'], 
+                                               events_from_annot=events_from_annot, verbose=False)
+
+                    # Generate PSDs
+                    psds_.append(self.make_psd(epochs_, fs=fs, 
+                                               resolution=resolution, 
+                                               tmin=tmin, tmax=tmax, 
+                                               fmin=fmin, fmax=fmax, 
+                                               nPerSegment=int(secPerSegment * fs), 
+                                               nOverlap=int(secOverlap * fs), 
+                                               aggregate=True, verbose=False))
+                except KeyError:
+                    # Print label of Epoch if not found, PSDs also will not exist
+                    print(f'{label}{i} not found')
+            else: 
+                # Print label of Epoch if being skipped
+                print(f'Skipping Epoch {i}')
+        return np.stack(psds_)
 
 
     def convert_dB(self, X=None):

@@ -89,7 +89,7 @@ if __name__ == '__main__':
     # Here we are making sure the task trial length is 9 seconds
     rejectSec = taskSec - 9 # 1 [s]
 
-    # Min and max time for each epoch
+    # Min and Max time for each epoch
     tmin = 0
     twindow = (taskSec - rejectSec) # e.g. 9
     tmax = twindow/nSplit # e.g. 1.5
@@ -250,83 +250,35 @@ if __name__ == '__main__':
         # Create Epochs and PSDs
         events_from_annot, event_dict = mne.events_from_annotations(RAW_SL)
 
-        def epochs_to_psd(RAW=None, fs=None, event_dict=None, label=None, events_from_annot=None, tmin=None, tmax=None, fmin=None, fmax=None, resolution=None, secPerSegment=None, secOverlap=None, nSkip=[]):
-            """
-            Generate epochs and psds based on pre-generated annotations
-
-            Args: 
-                RAW (mne.io.Raw): Raw object containing annotations and EEG signal.
-                fs (float): EEG sampling frequency.
-                event_dict (dict): Dictionary with annotation names as keys and event id as values.
-                label (str): Initial part of labels to assign to each epoch.
-                events_from_annot (numpy ndarray): Array containing [duration in samples, /, event id] for all annotations.
-                tmin (float): Initial time of an epoch in seconds.
-                tmax (float): Final time of an epoch in seconds. tmax - tmin = Length of an epoch in seconds.
-                fmin (float): Min frequency to be considered in PSDs.
-                fmax (float): Max frequency to be consdiered in PSDs.
-                resolution (float): Bin width in frequency space. 
-                secPerSegment (float): Length of segments in PSDs Welch method in seconds.
-                secOverlap (float): Length of overlap between segments in PSDs Welch method in seconds.
-                nSkip (list): List of Epochs within a trial to skip. E.g. [0,3,4]
-
-            Returns: 
-                numpy array: Return the PSDs associated to a specific trial.
-            """
-            # Generate all things
-            psds_ = []
-            for i in range(1,9):
-                if i not in nSkip: 
-                    try:
-                        # Generate Epochs
-                        epochs_ = EEG.make_epochs(RAW, 
-                                                  tmin=tmin, 
-                                                  tmax=tmax,  
-                                                  event_id=event_dict[label+f'{i}'], 
-                                                  events_from_annot=events_from_annot, verbose=False)
-
-                        # Generate PSDs
-                        psds_.append(EEG.make_psd(epochs_, fs=fs, 
-                                                  resolution=resolution, 
-                                                  tmin=tmin, tmax=tmax, 
-                                                  fmin=fmin, fmax=fmax, 
-                                                  nPerSegment=int(secPerSegment * fs), 
-                                                  nOverlap=int(secOverlap * fs), 
-                                                  aggregate=True, verbose=False))
-                    except KeyError:
-                        # Print label of Epoch if not found, PSDs also will not exist
-                        print(f'{label}{i} not found')
-                else: 
-                    # Print label of Epoch if being skipped
-                    print(f'Skipping Epoch {i}')
-            return np.stack(psds_)
+        
 
         # Generate PSDs for each type of trial
         nSkip = []
-        psds_left = epochs_to_psd(RAW_SL, fs, event_dict, 'left_', events_from_annot, 
-                                  tmin=tmin, tmax=tmax,
-                                  fmin=fmin, fmax=fmax, resolution=resolution, 
-                                  secPerSegment=secPerSegment, secOverlap=secOverlap, 
-                                  nSkip=nSkip)
-
-        psds_left_rest = epochs_to_psd(RAW_SL, fs, event_dict, 'left_rest_', events_from_annot, 
+        psds_left = EEG.epochs_to_psd(RAW_SL, fs, event_dict, 'left_', events_from_annot, 
                                        tmin=tmin, tmax=tmax,
                                        fmin=fmin, fmax=fmax, resolution=resolution, 
                                        secPerSegment=secPerSegment, secOverlap=secOverlap, 
                                        nSkip=nSkip)
 
-        psds_right = epochs_to_psd(RAW_SL, fs, event_dict, 'right_', events_from_annot, 
-                                   tmin=tmin, tmax=tmax,
-                                   fmin=fmin, fmax=fmax, resolution=resolution, 
-                                   secPerSegment=secPerSegment, secOverlap=secOverlap, 
-                                   nSkip=nSkip)
+        psds_left_rest = EEG.epochs_to_psd(RAW_SL, fs, event_dict, 'left_rest_', events_from_annot, 
+                                            tmin=tmin, tmax=tmax,
+                                            fmin=fmin, fmax=fmax, resolution=resolution, 
+                                            secPerSegment=secPerSegment, secOverlap=secOverlap, 
+                                            nSkip=nSkip)
 
-        psds_right_rest = epochs_to_psd(RAW_SL, fs, event_dict, 'right_rest_', events_from_annot, 
+        psds_right = EEG.epochs_to_psd(RAW_SL, fs, event_dict, 'right_', events_from_annot, 
                                         tmin=tmin, tmax=tmax,
                                         fmin=fmin, fmax=fmax, resolution=resolution, 
                                         secPerSegment=secPerSegment, secOverlap=secOverlap, 
                                         nSkip=nSkip)
 
-        # Find all channels on the left and right hemispheres
+        psds_right_rest = EEG.epochs_to_psd(RAW_SL, fs, event_dict, 'right_rest_', events_from_annot, 
+                                             tmin=tmin, tmax=tmax,
+                                             fmin=fmin, fmax=fmax, resolution=resolution, 
+                                             secPerSegment=secPerSegment, secOverlap=secOverlap, 
+                                             nSkip=nSkip)
+
+        # Find all channels on the left and right hemispheres (in the subset of central, parietal and frontal channels)
         isLeft_ch =  [x for x in eeg_dict.ch_central + eeg_dict.ch_parietal + eeg_dict.ch_frontal if x in EEG.find_ch_left(eeg_dict.ch_location)]
         isRight_ch = [x for x in eeg_dict.ch_central + eeg_dict.ch_parietal + eeg_dict.ch_frontal if x in EEG.find_ch_right(eeg_dict.ch_location)]
 
@@ -396,6 +348,7 @@ if __name__ == '__main__':
 
         # LEFT HAND Statistical Test begins
         fig, axs = plt.subplots(nrows=2, ncols=N, figsize=(int(4*N),6))
+
         # Generate array of trials, rest followed by task
         x = np.vstack([psds_left_rest, psds_left]) #(trial, ch, bin)
         # Generate labels for rest (True) and task (False)
@@ -403,13 +356,18 @@ if __name__ == '__main__':
         isContralat = isRight
 
         for i in range(len(freq_band)-1):
+            # Initialize the STAT class, specifying the contralaterla electrodes, the frequency bins and the frequency bands separators
             STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContralat, bins=bins_ticks, custom_bins=[freq_band[i], freq_band[i+1]])
+            
             # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
             x_ = np.mean(x[:, :, STAT.custom_ticks[0] : STAT.custom_ticks[-1]], axis=2)
             # Transform PSDs to dB
             x_ = EEG.convert_dB(x_)
+            
             # Calculate r2
             r2_left.append(STAT.Transform(x_, isTreatment))
+            
+            # Permutation test
             if perm_bool:
                 if i == 0: 
                     axs[0,i].set_title(f'Open/Close Left', fontsize=12,weight='bold', loc='left')
@@ -420,11 +378,14 @@ if __name__ == '__main__':
                 p = STAT.ApproxPermutationTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, plot=True, ax=axs[0,i])
                 p_left.append(p)
                 labels.append(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (P)')
+            
+            # Bootstrap test
             if boot_bool:
                 axs[1,i].text(0.98, 0.97, f'[{freq_band[i]}-{freq_band[i+1]-1}] Hz', va='top', ha='right', transform=axs[1,i].transAxes, fontsize=12)
                 p = STAT.BootstrapTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, nullHypothesisStatValue=0.0, plot=True, ax=axs[1,i])
                 p_left.append(p)
                 labels.append(f'{freq_band[i]}-{freq_band[i+1]-1} Hz (B)')
+        
         plt.tight_layout()
         plt.savefig(f'{path_to_folder}test_left_{resolution}_Hz.png')
         plt.savefig(f'{path_to_folder}test_left_{resolution}_Hz.svg')
@@ -438,6 +399,7 @@ if __name__ == '__main__':
 
         # RIGHT HAND Statistical Test begins
         fig, axs = plt.subplots(nrows=2, ncols=N, figsize=(int(4*N),6))
+        
         # Generate array of trials, rest followed by task
         x = np.vstack([psds_right_rest, psds_right]) #(trial, ch, bin)
         # Generate labels for rest (True) and task (False)
@@ -445,13 +407,19 @@ if __name__ == '__main__':
         isContralat = isLeft
 
         for i in range(len(freq_band)-1):
+            
+            # Initialize the STAT class, specifying the contralaterla electrodes, the frequency bins and the frequency bands separators
             STAT = mi.Stats(ch_set=ch_setSLAP, dict_symm=eeg_dict.dict_symm, isContralat=isContralat, bins=bins_ticks, custom_bins=[freq_band[i], freq_band[i+1]])
+            
             # Average the data (PSDs) within the specified frequency bins (trial, ch, bin) -> (trial, ch)
             x_ = np.mean(x[:, :, STAT.custom_ticks[0] : STAT.custom_ticks[-1]], axis=2)
             # Transform PSDs to dB
             x_ = EEG.convert_dB(x_)
+            
             # Calculate r2
             r2_right.append(STAT.Transform(x_, isTreatment))
+            
+            # Permutation test
             if perm_bool:
                 if i == 0: 
                     axs[0,i].set_title(f'Open/Close Right', fontsize=12,weight='bold', loc='left')
@@ -461,10 +429,13 @@ if __name__ == '__main__':
                 axs[0,i].text(0.98, 0.97, f'[{freq_band[i]}-{freq_band[i+1]-1}] Hz', va='top', ha='right', transform=axs[0,i].transAxes, fontsize=12)
                 p = STAT.ApproxPermutationTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, plot=True, ax=axs[0,i])
                 p_right.append(p)
+            
+            # Bootstrap test
             if boot_bool:
                 axs[1,i].text(0.98, 0.97, f'[{freq_band[i]}-{freq_band[i+1]-1}] Hz', va='top', ha='right', transform=axs[1,i].transAxes, fontsize=12)
                 p = STAT.BootstrapTest(x=x_, isTreatment=isTreatment, stat=STAT.DifferenceOfSumsR2, nSimulations=nSim, nullHypothesisStatValue=0.0, plot=True, ax=axs[1,i])
                 p_right.append(p)
+        
         plt.tight_layout()
         plt.savefig(f'{path_to_folder}test_right_{resolution}_Hz.png')
         plt.savefig(f'{path_to_folder}test_right_{resolution}_Hz.svg')
@@ -476,23 +447,26 @@ if __name__ == '__main__':
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # PLOT p-values extracted by Statistical tests
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # Left results ---------
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3.5), sharey=True)
         y_max = 0.5
         y_min = -0.5
         y = np.linspace(start=y_max, stop=y_min, num=len(p_left)+2)
         y = y[1:-1]
-        deltay = 0.05
-        # Left results
-        #---------
-        x_values = []
-        xUp_values = []
-        xDown_values = []
-        for p in p_left:
-            p_down, p, p_up = STAT.pvalue_interval(p, nSim+1)
-            xUp_values.append(STAT.negP(p_up))
-            x_values.append(STAT.negP(p))
-            xDown_values.append(STAT.negP(p_down))
+        deltay = 0.04
+        def montecarlo_error(ps, nSim):
+            x_values = []
+            xUp_values = []
+            xDown_values = []
+            for p in ps:
+                p_down, p, p_up = STAT.pvalue_interval(p, nSim+1)
+                xUp_values.append(STAT.negP(p_up))
+                x_values.append(STAT.negP(p))
+                xDown_values.append(STAT.negP(p_down))
+            return xDown_values, x_values, xUp_values
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3.5), sharey=True)
+        
+        # Left results ---------
+        xDown_values, x_values, xUp_values = montecarlo_error(p_left, nSim)
         #---------
         ax1.set_title('Open/Close Left', fontsize=12, loc='left', weight='bold')
         ax1.scatter(x_values, y, color='red', marker='o')
@@ -502,7 +476,7 @@ if __name__ == '__main__':
         ax1.hlines(y, 0, x_values, colors='red', lw=1.5, alpha=1)
         ax1.set_xlabel(r'-log(p)')
         ax1.set_xlim(ax1.get_xlim()[::-1])  # Reverse the x-axis for left plot
-        ax1.set_xlim(right=0, left=8)
+        ax1.set_xlim(right=0, left=6)
         ax1.set_ylim(y_min, y_max)
         ax1.axvline(STAT.negP(0.05), color='black', lw=1, ls=':', alpha=0.5, label=r'$\alpha=0.05$')
         ax1.axvline(STAT.negP(0.01), color='darkviolet', lw=1, ls=':', alpha=0.5, label=r'$\alpha=0.01$')
@@ -510,17 +484,8 @@ if __name__ == '__main__':
         ax1.set_yticklabels(labels)
         ax1.legend(loc='upper left')
 
-        ax1.text(1.25, 1.08, text_id, ha='right', va='top', transform = ax1.transAxes, fontsize=11, 
-                                  bbox=dict(facecolor='white', edgecolor='black', boxstyle='square,pad=0.1'))
         # Right results ---------
-        x_values = []
-        xUp_values = []
-        xDown_values = []
-        for p in p_right:
-            p_down, p, p_up = STAT.pvalue_interval(p, nSim+1)
-            xUp_values.append(STAT.negP(p_up))
-            x_values.append(STAT.negP(p))
-            xDown_values.append(STAT.negP(p_down))
+        xDown_values, x_values, xUp_values = montecarlo_error(p_right, nSim)
         #---------
         ax2.set_title('Open/Close Right', fontsize=12, loc='right', weight='bold')
         ax2.scatter(x_values, y, color='blue', marker='o')
@@ -529,11 +494,13 @@ if __name__ == '__main__':
             ax2.fill_betweenx([y[i]-deltay, y[i]+deltay], xDown_values[i], xUp_values[i], color='blue', alpha=0.3)
         ax2.hlines(y, 0, x_values, colors='blue', lw=1.5, alpha=1)
         ax2.set_xlabel(r'-log(p)')
-        ax2.set_xlim(left=0, right=8)
+        ax2.set_xlim(left=0, right=6)
         ax1.set_ylim(y_min, y_max)
         ax2.axvline(STAT.negP(0.05), color='black', lw=1, ls=':', alpha=0.5)
         ax2.axvline(STAT.negP(0.01), color='darkviolet', lw=1, ls=':', alpha=0.5)
-        #--------- 
+        
+        ax1.text(1.25, 1.08, text_id, ha='right', va='top', transform = ax1.transAxes, fontsize=11, bbox=dict(facecolor='white', edgecolor='black', boxstyle='square,pad=0.1'))
+        
         plt.subplots_adjust(wspace=0)  # Adjust space between subplots
         fig.savefig(f'{path_to_folder}pVal_{resolution}_Hz.png', bbox_inches='tight')
         fig.savefig(f'{path_to_folder}pVal_{resolution}_Hz.svg', bbox_inches='tight')
@@ -542,42 +509,30 @@ if __name__ == '__main__':
         plt.close()
         
 
-        # Plot p-values Left only
+        # Plot p-values Left only (Bootstrap)
         fig, ax = plt.subplots(figsize=(3, int(2*N)))
-        y_max = 0.5
-        y_min = -0.5
         y = np.linspace(start=y_max, stop=y_min, num=int(len(p_left)/2+2))
         y = y[1:-1]
-        deltay = 0.03
-        # Left results
+        deltay = 0.04
+
+        # Left results ---------
+        xDown_values, x_values, xUp_values = montecarlo_error(p_left[1::2], nSim)
         #---------
-        x_values = []
-        xUp_values = []
-        xDown_values = []
-        for p in p_left[1::2]:
-            p_down, p, p_up = STAT.pvalue_interval(p, nSim+1)
-            xUp_values.append(STAT.negP(p_up))
-            x_values.append(STAT.negP(p))
-            xDown_values.append(STAT.negP(p_down))
         ax.text(0, 1.05, 'Open/Close Left', ha='left', va='top', transform = ax.transAxes, fontsize=12, weight='bold')
-        
         # Draw dots and lines
         # Add confidence interval on true p
         for i in range(len(y)):
             ax.fill_betweenx([y[i]-deltay, y[i]+deltay], xDown_values[i], xUp_values[i], color='red', alpha=0.3)
         ax.hlines(y, 0, x_values, colors='crimson', lw=3, alpha=1)
         ax.scatter(x_values, y, color='crimson', marker='o', s=50)
-        
         # Draw bars
         #lower_errors = [x-y for x,y in zip(x_values, xUp_values)]  # Lower error values
         #upper_errors = [x-y for x,y in zip(xDown_values, x_values)]  # Upper error values
         #asymmetric_errors = [lower_errors, upper_errors]  # Pairing the lower and upper errors
         #ax.barh(y, x_values, color='crimson', edgecolor='black', height=0.07, xerr=asymmetric_errors, capsize=0, alpha=0.9)  # Capsize adds horizontal lines at the error bars' tips
-
         ax.set_xlabel('-ln(p)', loc='left', fontsize=12)
         ax.set_xlim(ax.get_xlim()[::-1])  # Reverse the x-axis for left plot
         ax.set_xlim(right=0, left=6)
-        
         dy = abs(y[-1] - y[-2])
         ax.set_ylim(y_min+dy*2/3, y_max-dy*2/3)
         ax.axvline(STAT.negP(0.05), 0, 0.94, color='black', lw=1, ls=':', alpha=0.5, label='95% C.L.')
@@ -586,7 +541,7 @@ if __name__ == '__main__':
         ax.spines['top'].set_visible(False)
         ax.spines['left'].set_visible(False)
         ax.text(0.75, 0.98, r'$\alpha=0.05$', ha='right', va='top', transform = ax.transAxes, fontsize=11)
-        #--------- 
+
         plt.subplots_adjust(wspace=0)  # Adjust space between subplots
         fig.savefig(f'{path_to_folder}pVal_left_{resolution}_Hz.png', bbox_inches='tight')
         fig.savefig(f'{path_to_folder}pVal_left_{resolution}_Hz.svg', bbox_inches='tight')
@@ -595,42 +550,27 @@ if __name__ == '__main__':
         plt.close()
 
 
-        # Plot p-values Right only
+        # Plot p-values Right only (Bootstrap)
         fig, ax = plt.subplots(figsize=(3, int(2*N)))
-        y_max = 0.5
-        y_min = -0.5
-        y = np.linspace(start=y_max, stop=y_min, num=int(len(p_right)/2+2))
-        y = y[1:-1]
-        deltay = 0.03
-        # Right results
-        #---------
-        x_values = []
-        xUp_values = []
-        xDown_values = []
-        for p in p_right[1::2]:
-            p_down, p, p_up = STAT.pvalue_interval(p, nSim+1)
-            xUp_values.append(STAT.negP(p_up))
-            x_values.append(STAT.negP(p))
-            xDown_values.append(STAT.negP(p_down))
-        ax.text(1.05, 1.05, 'Open/Close Right', ha='right', va='top', transform = ax.transAxes, fontsize=12, weight='bold')
         
+        # Right results ---------
+        xDown_values, x_values, xUp_values = montecarlo_error(p_right[1::2], nSim)
+        #---------
+        ax.text(1.05, 1.05, 'Open/Close Right', ha='right', va='top', transform = ax.transAxes, fontsize=12, weight='bold')
         # Draw dots and lines
         # Add confidence interval on true p
         for i in range(len(y)):
             ax.fill_betweenx([y[i]-deltay, y[i]+deltay], xDown_values[i], xUp_values[i], color='blue', alpha=0.3)
         ax.hlines(y, 0, x_values, colors='navy', lw=3, alpha=1)
         ax.scatter(x_values, y, color='navy', marker='o', s=50)
-
         # Draw bars
         #lower_errors = [x-y for x,y in zip(x_values, xUp_values)]  # Lower error values
         #upper_errors = [x-y for x,y in zip(xDown_values, x_values)]  # Upper error values
         #asymmetric_errors = [lower_errors, upper_errors]  # Pairing the lower and upper errors
         #ax.barh(y, x_values, color='darkturquoise', edgecolor='black', height=0.07, xerr=asymmetric_errors, capsize=0)  # Capsize adds horizontal lines at the error bars' tips
-
         ax.set_xlabel('-ln(p)', loc='right', fontsize=12)
         ax.set_xlim(ax.get_xlim()[::-1])  # Reverse the x-axis for right plot
         ax.set_xlim(left=0, right=6)
-        
         dy = abs(y[-1] - y[-2])
         ax.set_ylim(y_min+dy*2/3, y_max-dy*2/3)
         ax.axvline(STAT.negP(0.05), 0, 0.94, color='black', lw=1, ls=':', alpha=0.5, label='95% C.L.')
@@ -640,7 +580,6 @@ if __name__ == '__main__':
         ax.spines['right'].set_visible(False)
         ax.text(0.5, 0.98, r'$\alpha=0.05$', ha='right', va='top', transform = ax.transAxes, fontsize=11)
 
-        #--------- 
         plt.subplots_adjust(wspace=0)  # Adjust space between subplots
         fig.savefig(f'{path_to_folder}pVal_right_{resolution}_Hz.png', bbox_inches='tight')
         fig.savefig(f'{path_to_folder}pVal_right_{resolution}_Hz.svg', bbox_inches='tight')
@@ -1001,7 +940,7 @@ if __name__ == '__main__':
             plt.close()
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # GENERATE PDF REPORT
+        # GENERATE PDF REPORT (after generating the plots)
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         plot_folder = path_to_folder
 
@@ -1011,7 +950,7 @@ if __name__ == '__main__':
 
     else:
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # GENERATE PDF REPORT
+        # GENERATE PDF REPORT (no plots generation, use the existing ones in the folder)
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         plot_folder = path_to_folder
 
