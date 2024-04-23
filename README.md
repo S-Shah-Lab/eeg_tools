@@ -20,15 +20,15 @@ This folder contains a collection of scripts, libraries, and files used in the m
 ### Libraries
 The following is a list of libraries needed and how to install them and/or where to find info regarding the installation:
 
-pyprep (PREP)		            -- https://pypi.org/project/pyprep/
-BCI2000Tools (ChannelSet, SLAP) -- https://www.bci2000.org/mediawiki/index.php/Programming_Howto:Quickstart_Guide
-mne (EEG data objects)          -- https://mne.tools/stable/install/
+- `pyprep` (PREP)		            -- https://pypi.org/project/pyprep/
+- `BCI2000Tools` (ChannelSet, SLAP) -- https://www.bci2000.org/mediawiki/index.php/Programming_Howto:Quickstart_Guide
+- `mne` (EEG data objects)          -- https://mne.tools/stable/install/
 
-numpy (arrays)                  -- pip install numpy
-matplotlib (plotting)           -- pip install matplotlib
-reportlab (pdf generation)      -- pip install reportlab
-svglib (.svg images)            -- pip install svglib
-PIL (.png images)               -- pip install Pillow
+- `numpy` (arrays)                  -- pip install numpy
+- `matplotlib` (plotting)           -- pip install matplotlib
+- `reportlab` (pdf generation)      -- pip install reportlab
+- `svglib` (.svg images)            -- pip install svglib
+- `PIL` (.png images)               -- pip install Pillow
 
 ### Supporting Files
 The following files are needed to run the scripts correctly. They should be placed in the same folder with the other scripts.
