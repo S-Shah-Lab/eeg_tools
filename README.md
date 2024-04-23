@@ -5,15 +5,9 @@ This folder contains a collection of scripts, libraries, and files used in the m
 ## Table of Contents
 
 - [Requirements](#requirements)
-  - [Libraries] (#libraries)
-  - [Supporting Files] (#supportingfiles)
-- [Motor Imagery] (#motorimagery)
-  - [Paradigm] (#paradigm)
+- [Motor Imagery] (#motor-imagery)
 - [Usage] (#usage)
-  - [Pre-processing] (#preprocessing)
-  - [Statistical Tests] (#statisticaltests)
-  - [Plots] (#plots)
-- [PDF Report] (#pdfreport)
+- [PDF Report] (#pdf-report)
 - [Licence] (#license)
 
 ## Requirements
