@@ -78,24 +78,24 @@ Sometimes the files is not 418 seconds long. Several reasons for this e.g. the p
 
 ## Usage
 ### Pre-processing
-- Re-Referencing: 
+- ***Re-Referencing: ***
 Only the EGI 128 channels montage is re-referenced to the average mastorids (TP9 and TP10)
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/dsi24.png" width="750" alt="DSI 24 montage">
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/gtec32.png" width="750" alt="GTEC 32 montage">
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/egi128.png" width="750" alt="EGI 128 montage">
 
-- Filtering: 
+- ***Filtering: ***
 Bandpass filter [1, 40] Hz
 
-- PREP (https://pyprep.readthedocs.io/en/latest/index.html):  
+- ***PREP (https://pyprep.readthedocs.io/en/latest/index.html):  
 These are the thresholds set for PREP, and the analysis flow used for BAD channel identification and interpolation.
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/prep.png" width="750" alt="PREP thresholds">
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/prep_flow.png" width="750" alt="PREP flow in this analysis">
 
-- BAD Region Identification: 
+- ***BAD Region Identification: ***
 BAD regions are identified and marked using MNE directly on the EEG signal by the user. There is no automatic algorithm currenlty in place for this. The first part of the file (in theory 2 s at the very beginning but modified based on block size) is automatically flagged as BAD. 
 
-- Spatial Filtering:
+- ***Spatial Filtering:***
 The BCI2000 tool called "SLAP" is used to handle spatial filtering. The idea behind spatial filtering is that it allows to isolate differences among neighboring electrodes by subtracting to each one the average of the electrodes that surround it. Note that not all electrodes are used. The following two slides give more explainations about how this is done:
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/slap.png" width="750" alt="SLAP algorithm">
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/slap_idea.png" width="750" alt="SLAP concept with tool example">
