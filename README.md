@@ -58,7 +58,7 @@ This is the main script which runs the analysis and the report generation.
 "Motor imagery is a cognitive process in which a subject imagines that they perform a movement without actually performing the movement and without even tensing the muscles. It is a dynamic state during which the representation of a specific motor action is internally activated without any motor output. In other words motor imagery requires the conscious activation of brain regions that are also involved in movement preparation and execution, accompanied by a voluntary inhibition of the actual movement." [https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2797860/]
 
 
-Further reading: 
+***Further reading:***
 - https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2797860/
 - 
 
@@ -73,7 +73,7 @@ Each trial contains:
 
 2 + ((3 + 10) x 4) x 8 = 418 seconds
 
-Notes:
+***Notes:***
 Sometimes the files is not 418 seconds long. Several reasons for this e.g. the paradigm was stopped at some point before it naturally finished, the block size in BCI2000 was set to a value that resulted in a fractional number of blocks perfectly fitting into the sampling frequency. The latter has being fixed in March 2024.
 
 ## Usage
