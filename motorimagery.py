@@ -78,6 +78,10 @@ if __name__ == '__main__':
     elif montage_type == 'EGI_128': ch_info = 'EGI128_location.txt'
     elif montage_type == 'GTEC_32': ch_info = 'GTEC32_location.txt'
 
+    # Information used later in the PDF report generation
+    plot_folder = path_to_folder
+    montage_name = ' '.join(montage_type.split('_'))
+
     # Define paradigm information based on blocksize of the EEG file
     # If fs % blocksize == 0: 
     #    the blocksize fits perfectly in the sampling frequency so if a time window has a integer length (e.e 2 seconds) all blocks will be saved
@@ -230,7 +234,7 @@ if __name__ == '__main__':
         signalSLAP, ch_setSLAP = EEG.spatial_filter(sfilt  = 'SLAP', 
                                                     ch_set  = ch_set, 
                                                     signal  = RAW.get_data(picks='eeg'), 
-                                                    flag_ch = eeg_dict.ch_face + eeg_dict.ch_forehead, 
+                                                    flag_ch = eeg_dict.ch_face + eeg_dict.ch_forehead, # to be excluded
                                                     verbose = True)
 
         # Create RAW after spatial filter (RAW_SL)
@@ -942,18 +946,10 @@ if __name__ == '__main__':
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # GENERATE PDF REPORT (after generating the plots)
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        plot_folder = path_to_folder
-
-        montage_name = ' '.join(montage_type.split('_'))
-
         PdfReport.generate_pdf(plot_folder, montage_name, resolution)
 
     else:
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # GENERATE PDF REPORT (no plots generation, use the existing ones in the folder)
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        plot_folder = path_to_folder
-
-        montage_name = ' '.join(montage_type.split('_'))
-
         PdfReport.generate_pdf(plot_folder, montage_name, resolution)
