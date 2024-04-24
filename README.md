@@ -83,7 +83,25 @@ Sometimes the files is not 418 seconds long. Several reasons for this e.g. the p
 
 ## Usage
 ### How to Run the Script
+The script can be run with the line of code
 
+`python motorimagery.py -f /mnt/c/Users/scana/Desktop/MI_test/sub-HCpeds021_ses-01_task-MotorImag_run-01.dat`
+
+This line of code runs every step of the script, from pre-processing to the PDF report generation.
+
+***Note:*** A folder will be created where the `motorimagery.py` script is located with the name of the `.dat` file, if a folder with that name doesn't exist already. Several plots and the PDF report will be found in that folder. Additionally, a `.fif` file with the same name will be saved where the `motorimagery.py` script is located, this can be used to skip some steps if you run the script again.
+
+Additional options and customization: 
+- `-c`: (default=False) Assumes a new files and runs every step. If a `.fif` file has been previously generated, passing `-c True` saves some time and allows for more reproducible results. 
+- `-f`: (default='') Path to the `.dat` file. Must be given even if you have a `.fif` file already.
+- `-r`: (default=1) Resolution in frequency space of PSDs, in Hz.
+- `-fmin`: (default=1.) MIN frequency of PSDs.
+- `-fmax`: (default=40.) MAX frequency of PSDs.
+- `-fband`: (default=[4.,8.,13.,31.]) Defines the boundaries of connecting frequency bands. The lower value is included, the upper value is excluded.
+- `-prep`: (default=True) Allows to remove PREP from the analysis. 
+- `-xray`: (default=['c3', 'c4']) Generates additional plots for a detailed look at each specified channel (lowercase).
+- `-pause`: (default=0.5) Time window each matplotlib generated plot stays visible for before closing. Most plots are saved anyway. 
+- `-pdf`: (default=False) Allows to skip every analysis step and just generate a PDF report. 
 
 ## Details
 ### Pre-processing

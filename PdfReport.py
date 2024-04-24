@@ -37,11 +37,11 @@ class generate_pdf:
 		# Measurement date
 		self.date_test = self.prompt_for_date()
 
-		# Montage
-		self.montage_name = str(input("Enter montage name [DSI 24, GTEC 32, EGI 128]: "))
+		# Montage (they are now provided during class initialization)
+		#self.montage_name = str(input("Enter montage name [DSI 24, GTEC 32, EGI 128]: "))
 
-		# Resolution 
-		self.resolution = str(input("Enter the PSD resolution (e.g. 1): "))
+		# Resolution (they are now provided during class initialization)
+		#self.resolution = str(input("Enter the PSD resolution (e.g. 1): "))
 		
 		# Set up the canvas
 		self.c = canvas.Canvas(f'{self.plot_folder}MI_report_sub-{self.sub_name}_ses-{self.ses_name}.pdf', pagesize=letter)
