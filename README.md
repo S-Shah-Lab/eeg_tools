@@ -10,7 +10,10 @@ This folder contains a collection of scripts, libraries, and files used in the m
 - [Motor Imagery](#motor-imagery)
   - [Paradigm](#paradigm)
 - [Usage](#usage)
+  - [How to Run the Script](#how-to-run)
+- [Details](#details)
   - [Pre-processing](#pre-processing)
+  - [Epochs & PSDs](#epochs-psds)
   - [Statistical Tests](#statistical-tests)
   - [Plots](#plots)
 - [PDF Report](#pdf-report)
@@ -33,11 +36,11 @@ The following is a list of libraries needed and how to install them and/or where
 ### Supporting Files
 The following files are needed to run the scripts correctly. They should be placed in the same folder with the other scripts.
 
-These files contain channel information for the different montages that we are currently using. 
+These files contain channel information for the different montages that we are currently using. Currenlty only three montages are accepted by the scripts: DSI 24 channels, g.tec 32 channels, EGI 128 channels.
 
 - DSI24_location.txt
-- EGI128_location.txt
 - GTEC32_location.txt
+- EGI128_location.txt
 
 This Python file contains important dictionaries such as channel names conversion, symmetric channels, channels in each brain region, etc.
 
@@ -76,10 +79,16 @@ Each trial contains:
 ***Notes:***
 Sometimes the files is not 418 seconds long. Several reasons for this e.g. the paradigm was stopped at some point before it naturally finished, the block size in BCI2000 was set to a value that resulted in a fractional number of blocks perfectly fitting into the sampling frequency. The latter has being fixed in March 2024.
 
+
+
 ## Usage
+### How to Run the Script
+
+
+## Details
 ### Pre-processing
 - ***Re-Referencing:***
-Only the EGI 128 channels montage is re-referenced to the average mastorids (TP9 and TP10)
+Only the EGI 128 channels montage is re-referenced to the average mastorids (TP9 and TP10). 
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/dsi24.png" width="750" alt="DSI 24 montage">
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/gtec32.png" width="750" alt="GTEC 32 montage">
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/egi128.png" width="750" alt="EGI 128 montage">
@@ -100,7 +109,26 @@ The BCI2000 tool called "SLAP" is used to handle spatial filtering. The idea beh
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/slap.png" width="750" alt="SLAP algorithm">
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/slap_idea.png" width="750" alt="SLAP concept with tool example">
 
+### Epochs and PSDs
+The following slides illustrate how Epochs and PSDs are extracted for each trial: 
+<img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/epochs.png" width="750" alt="Information regarding Epochs">
+<img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/psds.png" width="750" alt="Information regarding PSDs">
+
+The following variables can be modified in `motorimagery.py` if changes are needed:
+- `nSplit`: defines the number of Epochs in each trial (default = 6). It also defines the length in seconds of each Epoch as it appears in the equation that defines `tmax`.
+- `rejectSec`: defines the time to be rejected after each cue (default = 1). This might be slighlty convoluted but the idea is that the integer in the equation is the window time to be used for analysis for each trial. 
+
 ### Statistical Tests
+Both questions of whether the subject is able to perform motor imagery with the left AND right hand are asked. A p-value is extracted for each hand movement. This is done via bootstrap and permutation tests. The bootstrap test is the main test performed, while the permutation test is manly done as validation of the bootstrap.
+While the PSDs are the starting point for both tests, for each frequency band of interest (e.g. alpha band) they are first aggregated over the bins in that frequency, converted to dB units and transformed into another variable called `signed-r²` which is used in the tests. 
+More information here: 
+<img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/eta2.png" width="750" alt="PSDs to signed-r2 conversion">
+<img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/stat_test.png" width="750" alt="Statistical Tests">
+<img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/perm.png" width="750" alt="Permutation Test">
+<img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/perm_2.png" width="750" alt="Permutation Test">
+<img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/perm_3.png" width="750" alt="Permutation Test">
+<img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/boot.png" width="750" alt="Bootstrap Test">
+
 ### Plots
 
 
