@@ -185,11 +185,15 @@ class generate_pdf:
 			str: Date in the format yyyy-mm-dd
 		"""
 		while True:
-			user_input = input("Enter date of the test [yyyy-mm-dd]: ")
+			user_input = input("Enter date of the test [yyyy-mm-dd] (0 if not known): ")
 			try:
-				# Attempt to parse the date string into a datetime object.
-				parsed_date = datetime.datetime.strptime(user_input, "%Y-%m-%d")
-				return parsed_date.strftime("%Y-%m-%d")  # Returns the date in yyyy-mm-dd format
+				if user_input == '0':
+					print('Date not known.')
+					return 'N/A'
+				else:
+					# Attempt to parse the date string into a datetime object.
+					parsed_date = datetime.datetime.strptime(user_input, "%Y-%m-%d")
+					return parsed_date.strftime("%Y-%m-%d")  # Returns the date in yyyy-mm-dd format
 			except ValueError:
 				# If there's an error in parsing, it means the format is incorrect.
 				print("Invalid date format. Enter date of the test [yyyy-mm-dd]: ")
@@ -205,12 +209,15 @@ class generate_pdf:
 			int: Age of the subject
 		"""
 		while True:
-			user_input = input("Enter the subject's age: ")
+			user_input = input("Enter the subject's age (0 if not known): ")
 			try:
 				# Attempt to convert the input to an integer.
 				age = int(user_input)
 				# Additional check: ensure age is within a reasonable range
-				if age < 0 or age > 120:
+				if age == 0: 
+					print("Age not known.")
+					return 'N/A'  
+				elif age < 0 or age > 120:
 					print("Invalid age entered. Please enter the subject's age.")
 				else:
 					return age  # Returns the age as an integer
