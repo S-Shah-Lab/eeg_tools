@@ -544,7 +544,7 @@ if __name__ == '__main__':
         ax.set_yticklabels([])
         ax.spines['top'].set_visible(False)
         ax.spines['left'].set_visible(False)
-        ax.text(0.75, 0.98, r'$\alpha=0.05$', ha='right', va='top', transform = ax.transAxes, fontsize=11)
+        ax.text(0.69, 0.98, r'$\alpha=0.05$', ha='right', va='top', transform = ax.transAxes, fontsize=11)
 
         plt.subplots_adjust(wspace=0)  # Adjust space between subplots
         fig.savefig(f'{path_to_folder}pVal_left_{resolution}_Hz.png', bbox_inches='tight')
@@ -582,7 +582,7 @@ if __name__ == '__main__':
         ax.set_yticklabels([])
         ax.spines['top'].set_visible(False)
         ax.spines['right'].set_visible(False)
-        ax.text(0.5, 0.98, r'$\alpha=0.05$', ha='right', va='top', transform = ax.transAxes, fontsize=11)
+        ax.text(0.42, 0.98, r'$\alpha=0.05$', ha='left', va='top', transform = ax.transAxes, fontsize=11)
 
         plt.subplots_adjust(wspace=0)  # Adjust space between subplots
         fig.savefig(f'{path_to_folder}pVal_right_{resolution}_Hz.png', bbox_inches='tight')
@@ -753,7 +753,7 @@ if __name__ == '__main__':
                 # Add r2 on top of PSD difference
                 ys =  [x * abs(x) * 10 for x in ys]
                 color='magenta'
-                axsPSD[2].plot(x_band, ys, '-o', color=color, markersize=4, label=r'r$^{2}$ [$\times$10]')
+                axsPSD[2].plot(x_band, ys, '-o', color=color, markersize=4, label=r'signed-r$^{2}$ [$\times$10]')
                 axsPSD[2].scatter(x_band, ys, color='black', s=60)
                 axsPSD[2].legend(loc='lower right', frameon=True)
                 # Add new axis on the right
