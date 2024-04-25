@@ -1082,7 +1082,7 @@ class Stats:
         transf (str): Transformation to apply to the PSDs. 
 
     Methods:
-        CalculateEtas2
+        CalculateEta2
         Dummy
         CalculateR
         CalculateR2
@@ -1109,7 +1109,7 @@ class Stats:
 
         self.EEG = EEG()
 
-    def CalculateEtas2(self, x=None, isTreatment=None, signed=True):
+    def CalculateEta2(self, x=None, isTreatment=None, signed=True):
         """
         Calculates Eta squared (η²), a measure of effect size, for comparing variances between and within groups.
         The ratio between the variance between groups and the total variance is commonly referred to as the "Eta squared (η²)" in statistics. 
@@ -1239,7 +1239,7 @@ class Stats:
                 - 'r2': Computes the squared Pearson correlation coefficient (R²) to quantify the strength of association.
         """
         if self.transf == 'eta2':
-            return self.CalculateEtas2(x=x, isTreatment=isTreatment)
+            return self.CalculateEta2(x=x, isTreatment=isTreatment)
         elif self.transf == 'r2':
             return self.CalculateR2(x=x, isTreatment=isTreatment)
 
@@ -1331,7 +1331,7 @@ class Stats:
         observed = stat(x, isTreatment)  # Calculate observed statistic
         # Perform permutations and calculate p-value
         hist = [stat(x, self.Shuffle(isTreatment)) for _ in range(nSimulations)]
-        nReached = sum(np.array(hist) >= observed)
+        nReached = sum(np.array(hist) > observed)
         # Calculate p-value
         p = (0.5 + nReached) / (1.0 + nSimulations)
         if plot:  # Optionally plot the distribution of permuted statistics
