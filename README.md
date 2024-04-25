@@ -38,23 +38,23 @@ The following files are needed to run the scripts correctly. They should be plac
 
 These files contain channel information for the different montages that we are currently using. Currenlty only three montages are accepted by the scripts: DSI 24 channels, g.tec 32 channels, EGI 128 channels.
 
-- DSI24_location.txt
-- GTEC32_location.txt
-- EGI128_location.txt
+- `DSI24_location.txt`
+- `GTEC32_location.txt`
+- `EGI128_location.txt`
 
 This Python file contains important dictionaries such as channel names conversion, symmetric channels, channels in each brain region, etc.
 
-- eeg_dict.py
+- `eeg_dict.py`
 
 These three libraries contain tools for EEG data analysis, plotting, and statistical tests, as well as the report generation.
 
-- PlotStyle.py
-- PdfReport.py
-- MotorImageryTools.py
+- `MotorImageryTools.py`
+- `PdfReport.py`
+- `PlotStyle.py` (not fundamental, if not used comment 2 lines in the main script)
 
 This is the main script which runs the analysis and the report generation.
 
-- motorimagery.py
+- `motorimagery.py`
 
 ## Motor Imagery
 
@@ -63,7 +63,7 @@ This is the main script which runs the analysis and the report generation.
 
 ***Further reading:***
 - https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2797860/
-- 
+- To be continued
 
 ### Paradigm
 A file is 418 s long and it contains 8 blocks in which 4 trials are repeated. There are 2 s of silence at the beginning of the file. 
@@ -77,8 +77,10 @@ Each trial contains:
 2 + ((3 + 10) x 4) x 8 = 418 seconds
 
 ***Notes:***
-Sometimes the files is not 418 seconds long. Several reasons for this e.g. the paradigm was stopped at some point before it naturally finished, the block size in BCI2000 was set to a value that resulted in a fractional number of blocks perfectly fitting into the sampling frequency. The latter has being fixed in March 2024.
-
+Sometimes the files is not 418 seconds long. 
+Several reasons might cause this, for example:
+- The paradigm was stopped at some point before it naturally finished, this doesn't mean an analysis can be done as long as a few trials per type are recorded and not rejected in the cleaning process.
+- The block size in BCI2000 was set to a "bad" value. Different montages have different sampling rates, in addition, each segment of the paradigm has a different time length. The motor imagery paradigm we use is well behaved in the sense that each step of it (cues and tasks) takes an integer amout of seconds. This allows for a choice of the block size to be a perfect divisor of the sampling rate without "weird" behaviors. If that is not the case, the length of cues and tasks might vary from the original design. This problem has being fixed in March 2024, when the block size for the GTEC 32 channels montage (sampling rate = 250 Hz) was changed from 32 to 10. 
 
 
 ## Usage
@@ -89,10 +91,10 @@ The script can be run with the line of code
 
 This line of code runs every step of the script, from pre-processing to the PDF report generation.
 
-***Note:*** A folder will be created where the `motorimagery.py` script is located with the name of the `.dat` file, if a folder with that name doesn't exist already. Several plots and the PDF report will be found in that folder. Additionally, a `.fif` file with the same name will be saved where the `motorimagery.py` script is located, this can be used to skip some steps if you run the script again.
+***Note:*** A folder will be created where the `.dat` file is located with the same name as the `.dat` file, if a folder with that name doesn't exist already. Several plots and the PDF report will be found in that folder. Additionally, a `.fif` file with the same name will be saved where the `.dat` file is located, this can be used to skip some steps if you run the script again with the correct options (see below).
 
 Additional options and customization: 
-- `-c`: (default=False) Assumes a new files and runs every step. If a `.fif` file has been previously generated, passing `-c True` saves some time and allows for more reproducible results. 
+- `-c`: (default=False) Assumes a new files and runs every step. If a `.fif` file has been previously generated, passing `-c True` or `-c 1` saves some time and allows for more reproducible results. 
 - `-f`: (default='') Path to the `.dat` file. Must be given even if you have a `.fif` file already.
 - `-r`: (default=1) Resolution in frequency space of PSDs, in Hz.
 - `-fmin`: (default=1.) MIN frequency of PSDs.
@@ -105,6 +107,8 @@ Additional options and customization:
 
 ## Details
 ### Pre-processing
+The code for these steps can be found in `motorimagery.py` and `MotorImageryTools.py`.
+
 - ***Re-Referencing:***
 Only the EGI 128 channels montage is re-referenced to the average mastorids (TP9 and TP10). 
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/dsi24.png" width="750" alt="DSI 24 montage">
@@ -128,6 +132,8 @@ The BCI2000 tool called "SLAP" is used to handle spatial filtering. The idea beh
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/slap_idea.png" width="750" alt="SLAP concept with tool example">
 
 ### Epochs and PSDs
+The code for these steps can be found in `motorimagery.py` and `MotorImageryTools.py`.
+
 The following slides illustrate how Epochs and PSDs are extracted for each trial: 
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/epochs.png" width="750" alt="Information regarding Epochs">
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/psds.png" width="750" alt="Information regarding PSDs">
@@ -137,6 +143,8 @@ The following variables can be modified in `motorimagery.py` if changes are need
 - `rejectSec`: defines the time to be rejected after each cue (default = 1). This might be slighlty convoluted but the idea is that the integer in the equation is the window time to be used for analysis for each trial. 
 
 ### Statistical Tests
+The code for these steps can be found in `motorimagery.py` and `MotorImageryTools.py`.
+
 Both questions of whether the subject is able to perform motor imagery with the left AND right hand are asked. A p-value is extracted for each hand movement. This is done via bootstrap and permutation tests. The bootstrap test is the main test performed, while the permutation test is manly done as validation of the bootstrap.
 While the PSDs are the starting point for both tests, for each frequency band of interest (e.g. alpha band) they are first aggregated over the bins in that frequency, converted to dB units and transformed into another variable called `signed-r²` which is used in the tests. 
 More information here: 
@@ -148,9 +156,28 @@ More information here:
 <img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/boot.png" width="750" alt="Bootstrap Test">
 
 ### Plots
+The code for these steps can be found in `motorimagery.py` and `MotorImageryTools.py`.
 
+The following is a list of the plots that are generated when running the main script (all plots are saved in `.png` and `.svg` formats): 
+
+- Paradigm StimulusCode: used to cross check annotations and change in code for rest-after-right trials
+- Epochs annotations: used to cross check the expected number of epoch per trial
+- SLAP matrix: identifies the transformation applied to the channels in the spatial filtering process (not saved)
+- Electrodes used in statistical tests: identifies the electrodes currently used in the statistical tests, left vs right
+- Histogram from statistical tests: provides more information regarding the statistical tests and how the p-values are calculated
+- p-values (left and right hands together): puts all p-values in a single plot for a quick comparison
+- p-values (left, right Bootstrap only, found in report): selects the p-values from the bootstrap tests for the PDF report
+- Signed-r² topoplots (found in report): visualizes the signed-r² per channel per frequency band
+- Selected channels detailed information: used to cross check PSDs and signed-r² values calculation
+- PSDs for selected channels (found in report): visualizes the PSDs overlapped for different trial types of selected channels
 
 ## PDF Report
+The code for these steps can be found in `motorimagery.py` and `PdfReport.py`.
 
+The PDF report is meant to summarize the results of the tests with useful plots. 
+In the header, some information is automatically filled in such as subject name, montage, PSDs frequency resolution and so on. The script will ask for the subject's age at the time of the test and the day the test was done. 
+
+The main script has an option `-pdf` which can be set to True in order to generate the PDF report without the need to rerun the whole script. This is useful if the plots are already in the dedicated folder. 
 
 ## Licence
+To be continued
