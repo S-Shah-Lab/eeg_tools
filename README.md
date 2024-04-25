@@ -125,6 +125,7 @@ These are the thresholds set for PREP, and the analysis flow used for BAD channe
 
 - ***BAD Region Identification:***
 BAD regions are identified and marked using MNE directly on the EEG signal by the user. There is no automatic algorithm currenlty in place for this. The first part of the file (in theory 2 s at the very beginning but modified based on block size) is automatically flagged as BAD. 
+<img src="https://github.com/S-Shah-Lab/motor_imagery/blob/main/assets/bad_region.png" width="750" alt="BAD region selection">
 
 - ***Spatial Filtering:***
 The BCI2000 tool called "SLAP" is used to handle spatial filtering. The idea behind spatial filtering is that it allows to isolate differences among neighboring electrodes by subtracting to each one the average of the electrodes that surround it. Note that not all electrodes are used. The following two slides give more explainations about how this is done:
