@@ -8,12 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib 
 from matplotlib.colors import LinearSegmentedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
-from pyprep.prep_pipeline import PrepPipeline, NoisyChannels
-
-import eeg_dict # Contains dictionaries and libraries for electrodes locations 
-
-
-
+from pyprep.prep_pipeline import NoisyChannels
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # EEG
