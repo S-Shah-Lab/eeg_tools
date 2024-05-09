@@ -1843,6 +1843,55 @@ class Plotting:
 
         self.EEG = EEG()
 
+    def plot_channelset(
+        ch_set=None,
+        montage_type=None,
+        sub_name=None,
+        ses_name=None,
+        pause=None,
+        figsize=(6, 6),
+    ):
+        """
+        Plot ChannelSet with additional information
+
+        Parameters:
+            ch_set (BCI2000Tools.Electrodes.ChannelSet): An object representing the set of channels/electrodes
+            montage_type (str): EEG montage used. Format: 'EGI_128'
+            sub_name (str): Subject name
+            ses_name (str): Session number
+            pause (float): Time interval for the plot to show
+            figsize (tuple): (x,y) dimensions of the output plot
+
+        Returns:
+            None
+        """
+        plt.figure(figsize=figsize)
+        ch_set.plot()
+        plt.text(-1, 1.15, f"Montage", weight="bold", va="top", ha="left", fontsize=12)
+        split_text = montage_type.split("_")
+        plt.text(
+            -1,
+            1.05,
+            f"{split_text[0]} {split_text[1]} Channels",
+            va="top",
+            ha="left",
+            fontsize=12,
+        )
+        if sub_name:
+            plt.text(0.8, 1.15, f"Sub", weight="bold", va="top", ha="right", fontsize=12)
+            plt.text(1, 1.15, f"{sub_name}", va="top", ha="right", fontsize=12)
+        if ses_name:
+            plt.text(0.8, 1.05, f"Ses", weight="bold", va="top", ha="right", fontsize=12)
+            plt.text(1, 1.05, f"{ses_name}", va="top", ha="right", fontsize=12)
+        plt.tight_layout()
+        # Save the plot
+        # plt.savefig(f'{path_to_folder}montage.png', bbox_inches='tight')
+        # plt.savefig(f'{path_to_folder}montage.svg', bbox_inches='tight')
+        plt.show(block=False)
+        if pause:
+            plt.pause(pause)
+        plt.close()
+
     def show_electrode(
         self,
         ch_location=None,

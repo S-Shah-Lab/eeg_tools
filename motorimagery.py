@@ -187,12 +187,10 @@ if __name__ == "__main__":
     base_name, extension = os.path.splitext(file_name)
     sub_name = base_name.split("sub-")[1].split("_ses")[0]
     ses_name = base_name.split("ses-")[1].split("_")[0]
-
     # String used in some plots for labeling
     text_id = (
         "Sub" + f" $\mathbf{{{sub_name}}}$,  " + "Ses" + f" $\mathbf{{{ses_name}}}$"
     )
-
     # Create a folder using base name, if folder doesn't exist
     path_to_folder = EEG.clean_path(
         EEG.create_folder(path=file_path, folder_name=base_name)
@@ -229,7 +227,6 @@ if __name__ == "__main__":
     # Rejected seconds after end of cue
     # Here we are making sure the task trial length is 9 seconds
     rejectSec = taskSec - twindow  # 1 [s]
-
     # Min and Max time for each epoch
     tmin = 0
     tmax = twindow / nSplit  # e.g. 1.5
@@ -279,35 +276,10 @@ if __name__ == "__main__":
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # PLOT ChannelSet after potential re-reference
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-            plt.figure(figsize=(6, 6))
-            ch_set.plot()
-            plt.text(
-                -1, 1.15, f"Montage", weight="bold", va="top", ha="left", fontsize=12
+            # Plot montage using BCI2000Tools
+            PLOT.plot_channelset(
+                ch_set, montage_type, sub_name, ses_name, pause=pause, figsize=(6, 6)
             )
-            split_text = montage_type.split("_")
-            plt.text(
-                -1,
-                1.05,
-                f"{split_text[0]} {split_text[1]} Channels",
-                va="top",
-                ha="left",
-                fontsize=12,
-            )
-            plt.text(
-                0.8, 1.15, f"Sub", weight="bold", va="top", ha="right", fontsize=12
-            )
-            plt.text(1, 1.15, f"{sub_name}", va="top", ha="right", fontsize=12)
-            plt.text(
-                0.8, 1.05, f"Ses", weight="bold", va="top", ha="right", fontsize=12
-            )
-            plt.text(1, 1.05, f"{ses_name}", va="top", ha="right", fontsize=12)
-            plt.tight_layout()
-            # Save the plot
-            # plt.savefig(f'{path_to_folder}montage.png', bbox_inches='tight')
-            # plt.savefig(f'{path_to_folder}montage.svg', bbox_inches='tight')
-            plt.show(block=False)
-            plt.pause(pause)
-            plt.close()
 
             # Create RAW with montage, signal is filtered
             RAW = EEG.make_RAW_with_montage(
@@ -357,7 +329,7 @@ if __name__ == "__main__":
             # This file can be imported later to skip all the previous steps
             EEG.save_RAW(RAW=RAW, path=file_path, file_name=base_name, label="")
 
-        else:  # if clean_bool:
+        else:  # Alternative to `if clean_bool:`
             # Import a previously saved .fif file
             RAW, montage, fs = EEG.import_file_fif(
                 path=file_path, file_name=base_name + ".fif"
@@ -379,14 +351,12 @@ if __name__ == "__main__":
             if montage_type == "EGI_128":
                 # Define ChannelSet
                 ch_set = ChannelSet("EGI128_location.txt")
-
                 # Re-reference, make sure this is the same as the one done before saving the RAW .fif
                 m = np.array(ch_set.RerefMatrix(new_ref))
-
                 # Apply re-reference, occurs in place
                 ch_set = ch_set.spfilt(m)
 
-        # RAW was saved without interpolation, in this way RAW.info['bads'] still contains the identified bad channels, if any
+        # RAW was saved without interpolation, RAW.info['bads'] contains the prevously identified bad channels, if any
         # Store previosly identified bad channels
         old_ch_bads = RAW.info["bads"]
 
@@ -407,12 +377,6 @@ if __name__ == "__main__":
                 )
                 print(f"Old bad channels: {old_ch_bads}")
                 print(f"Currently bad channels: {RAW.info['bads']}")
-
-        # RAW.plot()
-
-        # Summary of any region
-        # EEG.evaluate_BAD_region(RAW, 'BAD_region')
-        # EEG.evaluate_BAD_region(RAW, 'left_1')
 
         # Spatial filter with exclusion
         signalSLAP, ch_setSLAP = EEG.spatial_filter(
@@ -444,6 +408,7 @@ if __name__ == "__main__":
 
         # Generate PSDs for each type of trial
         nSkip = []
+        # Left trials
         psds_left = EEG.epochs_to_psd(
             RAW_SL,
             fs,
@@ -459,7 +424,7 @@ if __name__ == "__main__":
             secOverlap=secOverlap,
             nSkip=nSkip,
         )
-
+        # Rest after Left trials
         psds_left_rest = EEG.epochs_to_psd(
             RAW_SL,
             fs,
@@ -475,7 +440,7 @@ if __name__ == "__main__":
             secOverlap=secOverlap,
             nSkip=nSkip,
         )
-
+        # Right trials
         psds_right = EEG.epochs_to_psd(
             RAW_SL,
             fs,
@@ -491,7 +456,7 @@ if __name__ == "__main__":
             secOverlap=secOverlap,
             nSkip=nSkip,
         )
-
+        # Rest after Right
         psds_right_rest = EEG.epochs_to_psd(
             RAW_SL,
             fs,
