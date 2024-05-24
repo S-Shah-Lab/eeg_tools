@@ -12,6 +12,13 @@ This script runs the major parts of the motor imagery paradigm analysis.
 
 if __name__ == "__main__":
     import argparse
+    from Meta import *
+
+    __version__ = GetRevision()
+    if __version__ == "unknown revision":
+        __version__ = "N/A"
+    else:
+        __version__ = __version__.split()[1]
 
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
@@ -153,11 +160,11 @@ if __name__ == "__main__":
 
     # Store input options into variables
     # does the imported .dat file have a previously cleaned .fif file?
-    clean_bool = opts.c
+    clean_bool = opts.cleaned
     # split imported file info into path and name
-    file_path, file_name = os.path.split(opts.f)
+    file_path, file_name = os.path.split(opts.file_path)
     # PSD frequency resolution
-    resolution = opts.r
+    resolution = opts.resolution
     # how long are the segments in Welch PSD method
     secPerSegment = 1 / resolution
     # how long are the overlapping parts in Welch PSD method
@@ -1635,10 +1642,14 @@ if __name__ == "__main__":
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # GENERATE PDF REPORT (after generating the plots)
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        PdfReport.generate_pdf(plot_folder, montage_name, resolution)
+        PdfReport.generate_pdf(
+            plot_folder, montage_name, resolution, version=__version__
+        )
 
     else:
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # GENERATE PDF REPORT (no plots generation, use the existing ones in the folder)
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        PdfReport.generate_pdf(plot_folder, montage_name, resolution)
+        PdfReport.generate_pdf(
+            plot_folder, montage_name, resolution, version=__version__
+        )
