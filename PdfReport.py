@@ -11,11 +11,12 @@ from PIL import Image
 
 
 class generate_pdf:
-    def __init__(self, plot_folder, montage_name, resolution):
+    def __init__(self, plot_folder, montage_name, resolution, version):
         # Import folder and set up information regarding the subject
         self.plot_folder = plot_folder
         self.montage_name = montage_name
         self.resolution = resolution
+        self.version = version
 
         self.base_name = self.plot_folder.split("/")[-2]
         # Subject's name
@@ -203,6 +204,14 @@ class generate_pdf:
             self.top_right[0],
             self.move_down_by(self.dict_alph["I"][1], y0),
             font_size=11,
+            bold_flags=[False],
+            align="right",
+        )
+        self.write_text(
+            [f"Version: {self.version}"],
+            self.top_right[0],
+            self.move_down_by(self.move_down_by(self.dict_alph["I"][1], y0), y0),
+            font_size=10,
             bold_flags=[False],
             align="right",
         )
