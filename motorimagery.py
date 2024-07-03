@@ -204,8 +204,8 @@ if __name__ == "__main__":
     )
 
     # Import .dat file
-    signal, states, fs, ch_names, blockSize, montage_type = EEG.import_file_dat(
-        file_path, file_name
+    signal, states, fs, ch_names, blockSize, montage_type, date_test = (
+        EEG.import_file_dat(file_path, file_name)
     )
 
     # The montage_type is automatically decided by the dimensions of the signal matrix
@@ -480,6 +480,10 @@ if __name__ == "__main__":
             nSkip=nSkip,
         )
 
+        print(
+            f"psds_left.shape, psds_left_rest.shape, psds_right.shape, psds_right_rest.shape: {psds_left.shape}, {psds_left_rest.shape}, {psds_right.shape}, {psds_right_rest.shape}"
+        )
+
         # Find all channels on the left and right hemispheres (in the subset of central, parietal and frontal channels)
         isLeft_ch = [
             x
@@ -594,6 +598,9 @@ if __name__ == "__main__":
 
         # Generate array of trials, rest followed by task
         x = np.vstack([psds_left_rest, psds_left])  # (trial, ch, bin)
+
+        print(f"x = np.vstack([psds_left_rest, psds_left]): {x.shape}")
+
         # Generate labels for rest (True) and task (False)
         isTreatment = np.arange(x.shape[0]) < psds_left_rest.shape[0]  # (trial,)
         isContralat = isRight
@@ -695,6 +702,9 @@ if __name__ == "__main__":
 
         # Generate array of trials, rest followed by task
         x = np.vstack([psds_right_rest, psds_right])  # (trial, ch, bin)
+
+        print(f"x = np.vstack([psds_right_rest, psds_right]): {x.shape}")
+
         # Generate labels for rest (True) and task (False)
         isTreatment = np.arange(x.shape[0]) < psds_right_rest.shape[0]  # (trial,)
         isContralat = isLeft
@@ -1522,6 +1532,7 @@ if __name__ == "__main__":
             # Left and Right (Rest)
             x_left_rest = psds_left_rest[:, ch_idx, :]
             x_right_rest = psds_right_rest[:, ch_idx, :]
+
             # All (Rest)
             x_rest = np.vstack([x_left_rest, x_right_rest])
 
@@ -1589,7 +1600,9 @@ if __name__ == "__main__":
 
             ax2 = fig.add_subplot(gs[1, 0])
             x_ = np.vstack([x_left_rest, x_left])
-            isTreatment = np.arange(x.shape[0]) < x_left_rest.shape[0]
+
+            isTreatment = np.arange(x_.shape[0]) < x_left_rest.shape[0]
+
             ax2.plot(
                 STAT.bins,
                 STAT.CalculateR2(EEG.convert_dB(x_), isTreatment, signed=False),
@@ -1598,7 +1611,8 @@ if __name__ == "__main__":
             )
 
             x_ = np.vstack([x_right_rest, x_right])
-            isTreatment = np.arange(x.shape[0]) < x_right_rest.shape[0]
+
+            isTreatment = np.arange(x_.shape[0]) < x_right_rest.shape[0]
             ax2.plot(
                 STAT.bins,
                 STAT.CalculateR2(EEG.convert_dB(x_), isTreatment, signed=False),
@@ -1643,7 +1657,11 @@ if __name__ == "__main__":
         # GENERATE PDF REPORT (after generating the plots)
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         PdfReport.generate_pdf(
-            plot_folder, montage_name, resolution, version=__version__
+            plot_folder,
+            montage_name,
+            resolution,
+            date_test=date_test,
+            version=__version__,
         )
 
     else:
@@ -1651,5 +1669,9 @@ if __name__ == "__main__":
         # GENERATE PDF REPORT (no plots generation, use the existing ones in the folder)
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         PdfReport.generate_pdf(
-            plot_folder, montage_name, resolution, version=__version__
+            plot_folder,
+            montage_name,
+            resolution,
+            date_test=date_test,
+            version=__version__,
         )

@@ -122,6 +122,8 @@ class EEG:
         b = bcistream(path + file_name)
         signal, states = b.decode()
         signal = np.array(signal)
+        year, month, day = b.params["StorageTime"].split("T")[0].split("-")
+        date_test = f"{year}-{month}-{day}"
 
         # Retrieve additional parameters from the file
         fs = b.samplingrate()  # Sampling rate
@@ -135,7 +137,7 @@ class EEG:
         fileTime = signal.shape[1] / fs
 
         # Set montage type based on number of channels detected
-        if signal.shape[0] == 24:
+        if signal.shape[0] == 24 or signal.shape[0] == 21:
             montage_type = "DSI_24"
         elif signal.shape[0] == 32:
             montage_type = "GTEC_32"
@@ -168,7 +170,7 @@ class EEG:
             )
             print(f"StimulusCode: {np.unique(StimulusCode, return_counts=True)}\n")
 
-        return signal, states, fs, ch_names, blockSize, montage_type
+        return signal, states, fs, ch_names, blockSize, montage_type, date_test
 
     def evaluate_mi_paradigm(
         self, signal=None, states=None, fs=None, blockSize=None, verbose=True
@@ -1105,9 +1107,9 @@ class EEG:
         )
         # Note: Index 0 in shape is the number of epochs, index 1 is channel numbers, index 2 is EEG values at segment time t
         # Calculate the actual number of epochs created
-        n_epochs = epochs_.get_data(picks="eeg").shape[0]
-        if verbose:
-            print(f"Summary: {n_epochs}/{expected_epochs_per_type} total epochs")
+        # n_epochs = epochs_.get_data(picks="eeg").shape[0]
+        # if verbose:
+        #    print(f"Summary: {n_epochs}/{expected_epochs_per_type} total epochs")
 
         return epochs_
 
@@ -1250,22 +1252,25 @@ class EEG:
                         verbose=False,
                     )
 
-                    # Generate PSDs
-                    psds_.append(
-                        self.make_psd(
-                            epochs_,
-                            fs=fs,
-                            resolution=resolution,
-                            tmin=tmin,
-                            tmax=tmax,
-                            fmin=fmin,
-                            fmax=fmax,
-                            nPerSegment=int(secPerSegment * fs),
-                            nOverlap=int(secOverlap * fs),
-                            aggregate=True,
-                            verbose=False,
+                    print(f"{label}{i}: {epochs_.__len__()}")
+
+                    if epochs_.__len__() > 0:
+                        # Generate PSDs
+                        psds_.append(
+                            self.make_psd(
+                                epochs_,
+                                fs=fs,
+                                resolution=resolution,
+                                tmin=tmin,
+                                tmax=tmax,
+                                fmin=fmin,
+                                fmax=fmax,
+                                nPerSegment=int(secPerSegment * fs),
+                                nOverlap=int(secOverlap * fs),
+                                aggregate=True,
+                                verbose=False,
+                            )
                         )
-                    )
                 except KeyError:
                     # Print label of Epoch if not found, PSDs also will not exist
                     print(f"{label}{i} not found")
@@ -1844,6 +1849,7 @@ class Plotting:
         self.EEG = EEG()
 
     def plot_channelset(
+        self,
         ch_set=None,
         montage_type=None,
         sub_name=None,
@@ -1878,10 +1884,14 @@ class Plotting:
             fontsize=12,
         )
         if sub_name:
-            plt.text(0.8, 1.15, f"Sub", weight="bold", va="top", ha="right", fontsize=12)
+            plt.text(
+                0.8, 1.15, f"Sub", weight="bold", va="top", ha="right", fontsize=12
+            )
             plt.text(1, 1.15, f"{sub_name}", va="top", ha="right", fontsize=12)
         if ses_name:
-            plt.text(0.8, 1.05, f"Ses", weight="bold", va="top", ha="right", fontsize=12)
+            plt.text(
+                0.8, 1.05, f"Ses", weight="bold", va="top", ha="right", fontsize=12
+            )
             plt.text(1, 1.05, f"{ses_name}", va="top", ha="right", fontsize=12)
         plt.tight_layout()
         # Save the plot
