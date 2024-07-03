@@ -11,11 +11,24 @@ from PIL import Image
 
 
 class generate_pdf:
-    def __init__(self, plot_folder, montage_name, resolution, version):
+    def __init__(
+        self, plot_folder, montage_name, resolution, date_test=None, version="N/A"
+    ):
         # Import folder and set up information regarding the subject
         self.plot_folder = plot_folder
-        self.montage_name = montage_name
+
+        if montage_name == "DSI 24":
+            self.montage_name = "DSI-24"
+            self.reference = "Avg Mastoids"
+        elif montage_name == "GTEC 32":
+            self.montage_name = "g.Nautilus 32"
+            self.reference = "Rx Ear Lobe"
+        elif montage_name == "EGI 128":
+            self.montage_name = "HydroCel GNS 128"
+            self.reference = "Avg Mastoids"
+
         self.resolution = resolution
+        self.date_test = date_test
         self.version = version
 
         self.base_name = self.plot_folder.split("/")[-2]
@@ -40,7 +53,8 @@ class generate_pdf:
         self.formatted_date = today.strftime("%Y-%m-%d")
 
         # Measurement date
-        self.date_test = self.prompt_for_date()
+        if not self.date_test:
+            self.date_test = self.prompt_for_date()
 
         # Montage (they are now provided during class initialization)
         # self.montage_name = str(input("Enter montage name [DSI 24, GTEC 32, EGI 128]: "))
@@ -200,7 +214,7 @@ class generate_pdf:
             align="center",
         )
         self.write_text(
-            [f"Report: {self.formatted_date}"],
+            [f"Generated: {self.formatted_date}"],
             self.top_right[0],
             self.move_down_by(self.dict_alph["I"][1], y0),
             font_size=11,
@@ -224,7 +238,7 @@ class generate_pdf:
         # Left side
         self.write_text(
             ["Subject: ", f"{self.sub_name}"],
-            self.xmid - dx,
+            self.xmid * 2 / 3 - dx,
             self.move_down_by(self.dict_alph["I"][1], y0 + dy),
             font_size=font_size,
             bold_flags=[False, True],
@@ -232,40 +246,67 @@ class generate_pdf:
         )
         self.write_text(
             ["Session: ", f"{self.ses_name}"],
-            self.xmid - dx,
+            self.xmid * 2 / 3 - dx,
             self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
             font_size=font_size,
             bold_flags=[False, True],
             align="right",
         )
         self.write_text(
-            ["Date of Assessment: ", f"{self.date_test}"],
-            self.xmid - dx,
+            ["Date of assessment: ", f"{self.date_test}"],
+            self.xmid * 2 / 3 - dx,
             self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
             font_size=font_size,
             bold_flags=[False, True],
             align="right",
         )
+
+        # Center side
+        self.write_text(
+            ["Age at test: ", f"{self.sub_age} "],
+            self.xmid,
+            self.move_down_by(self.dict_alph["I"][1], y0 + dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="center",
+        )
+        self.write_text(
+            ["Condition: ", f"{self.condition} "],
+            self.xmid,
+            self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="center",
+        )
+        self.write_text(
+            ["Montage: ", f"{self.montage_name}"],
+            self.xmid,
+            self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="center",
+        )
+
         # Right side
         self.write_text(
-            ["Age: ", f"{self.sub_age} "],
-            self.xmid + dx,
+            ["Resolution: ", f"{self.resolution} Hz"],
+            self.xmid * 2 * 2 / 3 + dx,
             self.move_down_by(self.dict_alph["I"][1], y0 + dy),
             font_size=font_size,
             bold_flags=[False, True],
             align="left",
         )
         self.write_text(
-            ["Condition: ", f"{self.condition} "],
-            self.xmid + dx,
+            ["Rerefence: ", f"{self.reference}"],
+            self.xmid * 2 * 2 / 3 + dx,
             self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
             font_size=font_size,
             bold_flags=[False, True],
             align="left",
         )
         self.write_text(
-            ["Montage (Resolution): ", f"{self.montage_name} ({self.resolution} Hz)"],
-            self.xmid + dx,
+            ["Filter: ", f"1-40 Hz"],
+            self.xmid * 2 * 2 / 3 + dx,
             self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
             font_size=font_size,
             bold_flags=[False, True],
@@ -375,7 +416,7 @@ class generate_pdf:
                 int: Age of the subject
         """
         while True:
-            user_input = input("Enter the subject's age (0 if not known): ")
+            user_input = input("Enter the subject's year of birth (0 if not known): ")
             try:
                 # Attempt to convert the input to an integer.
                 age = int(user_input)
@@ -383,10 +424,14 @@ class generate_pdf:
                 if age == 0:
                     print("Age not known.")
                     return "N/A"
-                elif age < 0 or age > 120:
-                    print("Invalid age entered. Please enter the subject's age.")
+                elif age < 1900 or age > 3000:
+                    print(
+                        "Invalid age entered. Please enter the subject's year of birth."
+                    )
                 else:
-                    return age  # Returns the age as an integer
+                    return (
+                        int(self.date_test.split("-")[0]) - age
+                    )  # Returns the age as an integer
             except ValueError:
                 # If conversion to integer fails, it means the input was not a valid integer.
                 print("Invalid input. Please enter the subject's age.")
