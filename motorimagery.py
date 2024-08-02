@@ -125,6 +125,13 @@ if __name__ == "__main__":
         default="tp9 tp10",
         help="Specifies the channels used in rereferencing for EGI 128 montage, which is currently the only used montage that requires offline rerefencing. The variable is passed to the ChannelSet.RerefMatrix() function, when more than one channel is specified the new reference will be the average of those channels",
     )
+    parser.add_argument(
+        "--ch_egi",
+        metavar="ch_egi",
+        type=int,
+        default=128,
+        help="Specifies the number of channels to use in case the EGI montage is found, this is useful to break the duality of 128 channels or only a subset of 64 channels with the same montage",
+    )
 
     opts = parser.parse_args()
 
@@ -154,6 +161,15 @@ import PdfReport  # Contains tools for PDF report generation
 
 
 if __name__ == "__main__":
+
+    # Check if the file exists
+    if os.path.isfile(opts.file_path):
+        pass
+    # If the file doesn't exists print message and exit
+    else:
+        print(f"File {opts.file_path} not found! Exiting...\n")
+        exit(1)
+
     # Initialize EEG tools and plotting classes
     EEG = mi.EEG()  # Initialize EEG tools
     PLOT = mi.Plotting()  # Initialize Plotting tools
@@ -189,6 +205,8 @@ if __name__ == "__main__":
     twindow = opts.twindow
     # channels used in rereferencing for EGI 128 montage
     new_ref = opts.new_ref
+    # number of channels used in case of EGI 128 montage
+    ch_egi = opts.ch_egi
 
     # Extract base name from file
     base_name, extension = os.path.splitext(file_name)
@@ -198,6 +216,7 @@ if __name__ == "__main__":
     text_id = (
         "Sub" + f" $\mathbf{{{sub_name}}}$,  " + "Ses" + f" $\mathbf{{{ses_name}}}$"
     )
+
     # Create a folder using base name, if folder doesn't exist
     path_to_folder = EEG.clean_path(
         EEG.create_folder(path=file_path, folder_name=base_name)
@@ -212,6 +231,8 @@ if __name__ == "__main__":
     # ch_info contains the channel names for that specific montage
     if montage_type == "DSI_24":
         ch_info = "DSI24_location.txt"
+    elif montage_type == "EGI_64":
+        ch_info = "EGI64_location.txt"
     elif montage_type == "EGI_128":
         ch_info = "EGI128_location.txt"
     elif montage_type == "GTEC_32":

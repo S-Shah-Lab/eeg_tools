@@ -5,6 +5,7 @@ from reportlab.graphics import renderPDF
 from svglib.svglib import svg2rlg
 import xml.etree.ElementTree as ET
 
+import os
 import datetime
 from datetime import date
 from PIL import Image
@@ -17,12 +18,19 @@ class generate_pdf:
         # Import folder and set up information regarding the subject
         self.plot_folder = plot_folder
 
+        # Flags to make structural points and line visible
+        self.show_all_points = False
+        self.show_all_lines = False
+
         if montage_name == "DSI 24":
             self.montage_name = "DSI-24"
             self.reference = "Avg Mastoids"
         elif montage_name == "GTEC 32":
             self.montage_name = "g.Nautilus 32"
             self.reference = "Rx Ear Lobe"
+        elif montage_name == "EGI 64":
+            self.montage_name = "HydroCel GNS 64"
+            self.reference = "Avg Mastoids"
         elif montage_name == "EGI 128":
             self.montage_name = "HydroCel GNS 128"
             self.reference = "Avg Mastoids"
@@ -57,11 +65,14 @@ class generate_pdf:
             self.date_test = self.prompt_for_date()
 
         # Montage (they are now provided during class initialization)
-        # self.montage_name = str(input("Enter montage name [DSI 24, GTEC 32, EGI 128]: "))
+        # self.montage_name = str(input("Enter montage name [DSI 24, GTEC 32, EGI 64, EGI 128]: "))
 
         # Resolution (they are now provided during class initialization)
         # self.resolution = str(input("Enter the PSD resolution (e.g. 1): "))
 
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # BEGINNING OF CANVAS
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Set up the canvas
         self.c = canvas.Canvas(
             f"{self.plot_folder}MI_report_sub-{self.sub_name}_ses-{self.ses_name}.pdf",
@@ -77,6 +88,9 @@ class generate_pdf:
         # Distance from the canvas edges
         delta = 15
 
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # CORNER POINTS, PAGE DIMENSIONS
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Coordinates of the corners
         self.top_left = (
             self.move_right_by(xmin, delta),
@@ -99,112 +113,163 @@ class generate_pdf:
         self.page_width = self.top_right[0] - self.top_left[0]
         self.page_height = self.top_right[1] - self.bottom_right[1]
 
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # SECTION OF A PAGE
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Break down the page into 20 units
+        h_ = self.page_height / 20
+        # Define a space 2 units from top of page (splits upper section from header)
+        line_below_header = 2 * h_
+        # Define a space 11 units from top of page (splits lower section from upper section)
+        line_below_upper_section = 11 * h_
+
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # ANCHOR POINTS
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Create dictionary for anchor points
         self.dict_alph = {}
 
         # Create anchor points at the corners, clockwise starting from top left
         self.show_key_point(
-            "A", x=self.top_left[0], y=self.top_left[1], show=False
+            "A", x=self.top_left[0], y=self.top_left[1], show=self.show_all_points
         )  # Top left (A)
         self.show_key_point(
-            "B", x=self.top_right[0], y=self.top_right[1], show=False
+            "B", x=self.top_right[0], y=self.top_right[1], show=self.show_all_points
         )  # Top right (B)
         self.show_key_point(
-            "C", x=self.bottom_right[0], y=self.bottom_right[1], show=False
+            "C",
+            x=self.bottom_right[0],
+            y=self.bottom_right[1],
+            show=self.show_all_points,
         )  # Bottom right (C)
         self.show_key_point(
-            "D", x=self.bottom_left[0], y=self.bottom_left[1], show=False
+            "D", x=self.bottom_left[0], y=self.bottom_left[1], show=self.show_all_points
         )  # Bottom left (D)
 
-        # Draw lines connecting the corners
-        # AB
-        # self.draw_hline(x1=self.top_left[0], x2=self.top_right[0], y=self.top_left[1], color=colors.black)
-
-        # BC
-        # self.draw_vline(x=self.top_right[0], y1=self.top_right[1], y2=self.bottom_right[1], color=colors.red)
-
-        # CD
-        # self.draw_hline(x1=self.bottom_left[0], x2=self.bottom_right[0], y=self.bottom_left[1], color=colors.blue)
-
-        # DA
-        # self.draw_vline(x=self.bottom_left[0], y1=self.top_left[1], y2=self.bottom_left[1], color=colors.green)
-
-        # Break down the page into 20 units
-        h_ = self.page_height / 20
-
-        # Create the boundary between HEADER and UPPER SECTION, 2 unit from the top
-        # H line
-        gap_from_top = 2 * h_
-        # self.draw_hline(x1=self.top_left[0], x2=self.top_right[0], y=self.move_down_by(self.top_left[1], gap_from_top), color=colors.grey)
-        self.draw_hline(
-            x1=self.top_left[0],
-            x2=self.top_right[0],
-            y=self.move_down_by(self.top_left[1], gap_from_top),
-            color=colors.black,
-        )
-        # Create additional anchor points
+        # Create anchor points between HEADER and UPPER SECTION
         self.show_key_point(
             "E",
             x=self.top_left[0],
-            y=self.move_down_by(self.top_left[1], gap_from_top),
-            show=False,
+            y=self.move_down_by(self.top_left[1], line_below_header),
+            show=self.show_all_points,
         )
         self.show_key_point(
             "F",
             x=self.top_right[0],
-            y=self.move_down_by(self.top_left[1], gap_from_top),
-            show=False,
+            y=self.move_down_by(self.top_left[1], line_below_header),
+            show=self.show_all_points,
         )
         self.show_key_point(
             "I",
             x=self.move_right_by(self.page_width / 2, self.top_left[0]),
             y=self.top_right[1],
-            show=False,
+            show=self.show_all_points,
         )
         self.show_key_point(
             "J",
             x=self.move_right_by(self.page_width / 2, self.top_left[0]),
-            y=self.move_down_by(self.top_left[1], gap_from_top),
-            show=False,
+            y=self.move_down_by(self.top_left[1], line_below_header),
+            show=self.show_all_points,
         )
 
-        # Create the boundary between UPPER SECTION and LOWER SECTION, 11 unit from the top
-        # H line
-        gap_from_top = 11 * h_
-        # self.draw_hline(x1=self.top_left[0], x2=self.top_right[0], y=self.move_down_by(top_left[1], gap_from_top), color=colors.grey)
+        # Create anchor points between UPPER SECTION and LOWER SECTION
         self.show_key_point(
             "G",
             x=self.top_left[0],
-            y=self.move_down_by(self.top_left[1], gap_from_top),
-            show=False,
+            y=self.move_down_by(self.top_left[1], line_below_upper_section),
+            show=self.show_all_points,
         )
         self.show_key_point(
             "H",
             x=self.top_right[0],
-            y=self.move_down_by(self.top_left[1], gap_from_top),
-            show=False,
+            y=self.move_down_by(self.top_left[1], line_below_upper_section),
+            show=self.show_all_points,
         )
         self.show_key_point(
             "K",
             x=self.move_right_by(self.page_width / 2, self.top_left[0]),
-            y=self.move_down_by(self.top_left[1], gap_from_top),
-            show=False,
+            y=self.move_down_by(self.top_left[1], line_below_upper_section),
+            show=self.show_all_points,
         )
         self.show_key_point(
             "L",
             x=self.move_right_by(self.page_width / 2, self.top_left[0]),
             y=self.bottom_right[1],
-            show=False,
+            show=self.show_all_points,
         )
 
-        # Mid line
-        # V line
-        # self.draw_vline(self.c, x=self.move_right_by(self.xmid, self.top_left[0]), y1=self.top_right[1], y2=self.bottom_right[1], color=colors.red)
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # STRUCTURAL LINES
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # Draw lines connecting the corners
+        if self.show_all_lines:
+            # AB (top horizontal)
+            self.draw_hline(
+                x1=self.top_left[0],
+                x2=self.top_right[0],
+                y=self.top_left[1],
+                color=colors.black,
+            )
 
+            # BC (right vertical)
+            self.draw_vline(
+                x=self.top_right[0],
+                y1=self.top_right[1],
+                y2=self.bottom_right[1],
+                color=colors.red,
+            )
+
+            # CD (bottom horizontal)
+            self.draw_hline(
+                x1=self.bottom_left[0],
+                x2=self.bottom_right[0],
+                y=self.bottom_left[1],
+                color=colors.blue,
+            )
+
+            # DA (left vertical)
+            self.draw_vline(
+                x=self.bottom_left[0],
+                y1=self.top_left[1],
+                y2=self.bottom_left[1],
+                color=colors.green,
+            )
+
+            # Split page vertically into two regions
+            # V line
+            self.draw_vline(
+                x=self.xmid,
+                y1=self.top_right[1],
+                y2=self.bottom_right[1],
+                color=colors.red,
+            )
+
+            # Create the boundary between UPPER SECTION and LOWER SECTION, 11 unit from the top
+            # H line
+            self.draw_hline(
+                x1=self.top_left[0],
+                x2=self.top_right[0],
+                y=self.move_down_by(self.top_left[1], line_below_upper_section),
+                color=colors.grey,
+            )
+
+            # Create the boundary between HEADER and UPPER SECTION, 2 unit from the top
+            # H line
+            self.draw_hline(
+                x1=self.top_left[0],
+                x2=self.top_right[0],
+                y=self.move_down_by(self.top_left[1], line_below_header),
+                color=colors.black,
+            )
+
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # HEADER INFORMATION
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Write the HEADER with subject and measurement information
         y0 = 15
         dx = 10
         dy = 15
+        # Title
         self.write_text(
             ["Motor Imagery Report"],
             self.xmid,
@@ -213,6 +278,7 @@ class generate_pdf:
             bold_flags=[True],
             align="center",
         )
+        # Upper right corner
         self.write_text(
             [f"Generated: {self.formatted_date}"],
             self.top_right[0],
@@ -230,6 +296,7 @@ class generate_pdf:
             align="right",
         )
 
+        # Left section
         font_size = 11
         height = self.move_down_by(self.dict_alph["I"][1], 15) - self.move_up_by(
             self.dict_alph["J"][1], 5
@@ -313,6 +380,9 @@ class generate_pdf:
             align="left",
         )
 
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # UPPER SECTION PLOTS
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Import r2 topoplots to the UPPER SECTION
         dy = 5
         height = self.move_down_by(self.dict_alph["E"][1], dy) - self.dict_alph["G"][1]
@@ -352,12 +422,15 @@ class generate_pdf:
             image_path, x=x_right, y=self.dict_alph["K"][1], width=width, height=None
         )
 
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # LOWER SECTION PLOTS
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Import c3 psds to the LOWER SECTION
         image_path = f"{plot_folder}c3_PSDs_{self.resolution}_Hz.svg"
         height = self.dict_alph["G"][1] - self.dict_alph["D"][1]
         self.draw_svg_image(
             image_path,
-            x=self.move_right_by(self.dict_alph["D"][0], 15),
+            x=self.move_right_by(self.dict_alph["L"][0], 15),
             y=self.move_up_by(self.dict_alph["L"][1], 5),
             width=None,
             height=height,
@@ -368,12 +441,94 @@ class generate_pdf:
         height = self.dict_alph["G"][1] - self.dict_alph["D"][1]
         self.draw_svg_image(
             image_path,
-            x=self.move_right_by(self.dict_alph["L"][0], 15),
+            x=self.move_right_by(self.dict_alph["D"][0], 15),
             y=self.move_up_by(self.dict_alph["L"][1], 5),
             width=None,
             height=height,
         )
 
+        # Import brain image
+        width = 85
+        image_path = os.path.join(
+            "/mnt/c/Users/scana/Dropbox/WCornell/develop/motorimagery/",
+            "brain_c3c4.svg",
+        )
+        self.draw_svg_image(
+            image_path,
+            x=self.move_left_by(self.xmid, width * 0.37),
+            y=self.move_up_by(
+                self.dict_alph["L"][1],
+                (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2,
+            ),
+            width=width,
+            height=None,
+        )
+
+        # Line for c3
+        self.draw_vline(
+            x=self.move_left_by(self.xmid, width * 0.37 / 2),
+            y1=self.move_up_by(
+                self.dict_alph["L"][1],
+                (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2 + width * 0.41,
+            ),
+            y2=self.move_up_by(
+                self.move_up_by(
+                    self.dict_alph["L"][1],
+                    (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2
+                    + width * 0.41,
+                ),
+                50,  # lenght of line
+            ),
+            color=colors.red,
+        )
+        self.draw_hline(
+            x1=self.move_left_by(self.xmid, width * 0.37 / 2),
+            x2=self.move_right_by(self.move_left_by(self.xmid, width * 0.37 / 2), 50),
+            y=self.move_up_by(
+                self.move_up_by(
+                    self.dict_alph["L"][1],
+                    (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2
+                    + width * 0.41,
+                ),
+                50,  # lenght of line
+            ),
+            color=colors.red,
+        )
+
+        # Line for c4
+        self.draw_vline(
+            x=self.move_right_by(self.xmid, width * 0.37 / 2),
+            y1=self.move_up_by(
+                self.dict_alph["L"][1],
+                (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2 + width * 0.41,
+            ),
+            y2=self.move_down_by(
+                self.move_up_by(
+                    self.dict_alph["L"][1],
+                    (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2
+                    + width * 0.41,
+                ),
+                50,
+            ),
+            color=colors.blue,
+        )
+        self.draw_hline(
+            x1=self.move_right_by(self.xmid, width * 0.37 / 2),
+            x2=self.move_left_by(self.move_right_by(self.xmid, width * 0.37 / 2), 50),
+            y=self.move_down_by(
+                self.move_up_by(
+                    self.dict_alph["L"][1],
+                    (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2
+                    + width * 0.41,
+                ),
+                50,
+            ),
+            color=colors.blue,
+        )
+
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+        # SAVE CANVAS
+        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Save the canvas
         self.c.save()
 
