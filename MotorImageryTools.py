@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import LinearSegmentedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 from pyprep.prep_pipeline import NoisyChannels
+from sklearn.mixture import GaussianMixture
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -119,7 +120,7 @@ class EEG:
         # Clean path string
         path = self.clean_path(path)
         # Load the .dat file
-        b = bcistream(path + file_name)
+        b = bcistream(os.path.join(path, file_name))
         signal, states = b.decode()
         signal = np.array(signal)
         year, month, day = b.params["StorageTime"].split("T")[0].split("-")
@@ -1920,7 +1921,7 @@ class Plotting:
             ch_location (list of tuples): List of tuples containing channel names and their X, Y coordinates.
             ch_list (list): List of channel names to highlight.
             label (bool): If True, display labels for the highlighted channels.
-            color (str): Color for the highlighted channels. Default is 'red'.
+            color (str, list): Color for the highlighted channels. Default is 'red'.
             alpha (float): Opacity level for the highlighted channels.
             ax (matplotlib.axes.Axes): Axis containing the plot.
             alpha_back (float): Opacity of background channels.
@@ -2112,6 +2113,28 @@ class Plotting:
             label=None,
         )
         cbar.set_ticks([vlim[1]])  # Set ticks to only the top value
+
+        # Add text reference to high and low values on the colorbar
+        ax[1].text(
+            -0.7,
+            0.90,
+            "ERS",
+            va="bottom",
+            ha="left",
+            transform=ax[1].transAxes,
+            color="black",
+            fontsize=9,
+        )
+        ax[1].text(
+            -0.7,
+            0,
+            "ERD",
+            va="bottom",
+            ha="left",
+            transform=ax[1].transAxes,
+            color="black",
+            fontsize=9,
+        )
 
         # Note: Some lines seem to repeat with slight modifications (e.g., mask parameters). It's assumed these are intentional
         # for demonstration purposes. Ensure this aligns with your actual processing needs.
@@ -2335,3 +2358,236 @@ class Plotting:
             plt.xlabel("PSD [dB]", loc="right", fontsize=11)
             plt.yticks([0, 1])
             plt.yticks(["Task", "Rest"], rotation=0)
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# PLOTTING
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+class SignalQuality:
+    """
+    A class for signal quality evaluation
+
+    This class provides methods to obtain information related to data quality which might provide a better understanding of the observed results.
+
+    Attributes:
+        None
+
+    Methods:
+
+    """
+
+    def __init__(self):
+        pass
+
+    def signal_power(self, signal=None):
+        """
+        Calculate the power of a given signal in the format of (ch x time points)
+        Also works if the signal is 1D
+
+        Args:
+            signal (numpy array): The signal for which to calculate the power, can have 1 or many channels
+
+        Returns:
+            np.array or float: The power of the signal per channel or the power of the signal in case of 1D
+        """
+        # Calculate the square of the signal amplitude
+        signal_squared = signal**2
+        # Calculate the mean of the squared signal, which represents the power
+        if len(signal.shape) > 1:
+            return np.mean(signal_squared, axis=1)
+        else:
+            return np.mean(signal_squared)
+
+    def calculate_signal_powers(
+        self, signal=None, fs=None, fDC=None, fLow=None, fHigh=None, fPowerLine=60
+    ):
+        """
+        Returns:
+            tuple
+        """
+        # Nyquist frequency
+        fNyq = fs / 2
+
+        # Power [x > 0.1Hz] signal
+        PfAll = self.signal_power(EEG().filter_data(signal, fs, fDC, None))
+        # Power [0.1Hz < x < 1Hz] signal
+        PfDC = self.signal_power(EEG().filter_data(signal, fs, fDC, fLow))
+        # Power [x > 1Hz] signal
+        PfLow = self.signal_power(EEG().filter_data(signal, fs, fLow, None))
+        # Power [1Hz < x < 40Hz] signal
+        PfInterest = self.signal_power(EEG().filter_data(signal, fs, fLow, fHigh))
+        # Power [x > 40Hz] signal
+        PfHigh = self.signal_power(EEG().filter_data(signal, fs, fHigh, None))
+        # Power power line signal [60Hz, 120Hz, ...] up to Nyquist frequency
+        PfLine = 0
+        for i, f in enumerate(np.arange(1, 5) * fPowerLine):
+            if f <= fNyq:
+                df = 1  # +- 1 Hz
+                PfLine += EEG().filter_data(signal, fs, f - df, f + df)
+        PfLine = self.signal_power(PfLine)
+
+        return PfAll, PfDC, PfLow, PfHigh, PfLine, PfInterest
+
+    def clustering_GaussianMixture(self, n_components=2, X=None):
+        """
+        Perform clustering with Gaussian Mixture algorithm
+
+        Args:
+            n_components (int): Number of clusters to look for
+            X (numpy array): Array with (ch x 2) dimensions, the columns are x and y coordinates
+
+        Returns:
+            np.array, np.array: tuple with cluster labels for each data point and array of unique clusters ID
+        """
+        # Create model
+        model = GaussianMixture(n_components=n_components)
+        # Fit model to data
+        model.fit(X)
+        # Obtain cluster label for each data point
+        yhat = model.predict(X)
+        return yhat, np.unique(yhat)
+
+    def quality_signal_powers(
+        self,
+        signal=None,
+        fs=None,
+        fDC=None,
+        fLow=None,
+        fHigh=None,
+        fPowerLine=60,
+        plot=False,
+        n_components=2,
+        ch_names=None,
+        eeg_dict=None,
+        path_to_folder=None,
+    ):
+        """
+        Calculate the power of a given signal in the format of (ch x time points)
+
+        Args:
+            signal (numpy array): The signal for which to calculate the power
+
+        Returns:
+            float: The power of the signal
+        """
+
+        PfAll, PfDC, PfLow, PfHigh, PfLine, PfInterest = self.calculate_signal_powers(
+            signal, fs, fDC, fLow, fHigh, fPowerLine
+        )
+
+        if plot:
+            # Assign a color to each cluster
+            colors = np.array(
+                ["r", "g", "b", "y", "c", "m", "k"]
+            )  # Example color array, expand or change as needed
+            # Ensure we have enough colors
+            if len(colors) < n_components:
+                raise ValueError(
+                    f"Not enough colors {len(colors)} for the number of clusters {n_components}"
+                )
+
+            # Plot the scatterplots for the combinations
+            fig, axs = plt.subplots(3, 2, figsize=(10, 15))
+            # 1st plot
+            # Perform clustering, 2 clusters
+            X = np.stack([PfDC / PfAll, PfLine / PfAll]).T
+            yhat, clusters = self.clustering_GaussianMixture(n_components=2, X=X)
+            cluster_colors = colors[yhat]
+            axs[0, 0].scatter(X[:, 0], X[:, 1], c=cluster_colors)
+            for i, (x_i, y_i) in enumerate(zip(X[:, 0], X[:, 1])):
+                axs[0, 0].text(
+                    x_i,
+                    y_i,
+                    f"{ch_names[i]}",
+                    fontsize=9,
+                    ha="right",
+                    va="bottom",
+                )
+            axs[0, 0].set_xlabel(r"Power 0.1-1 Hz / Total [%]", loc="right")
+            axs[0, 0].set_ylabel(r"Power Line / Total [%]")
+            # Need to pass same colors
+            Plotting().show_electrode(
+                eeg_dict.ch_location,
+                ch_names,
+                label=True,
+                ax=axs[0, 1],
+                alpha_back=0,
+                color=list(cluster_colors),
+            )
+            # axs[0,1].set_xlim(-1, 1)
+            # axs[0,1].set_ylim(-1, 1)
+            # axs[0,1].set_yticks([])
+            # axs[0,1].set_xticks([])
+            axs[0, 1].axis("off")
+
+            # 2nd plot
+            # Perform clustering, 2 clusters
+            X = np.stack([PfInterest / PfAll, PfLow / PfAll]).T
+            yhat, clusters = self.clustering_GaussianMixture(n_components=2, X=X)
+            cluster_colors = colors[yhat]
+            axs[1, 0].scatter(X[:, 0], X[:, 1], c=cluster_colors)
+            for i, (x_i, y_i) in enumerate(zip(X[:, 0], X[:, 1])):
+                axs[1, 0].text(
+                    x_i,
+                    y_i,
+                    f"{ch_names[i]}",
+                    fontsize=9,
+                    ha="right",
+                    va="bottom",
+                )
+            axs[1, 0].set_xlabel(r"Power 1-40 Hz / Total [%]", loc="right")
+            axs[1, 0].set_ylabel(r"Power >1 Hz / Total [%]")
+
+            Plotting().show_electrode(
+                eeg_dict.ch_location,
+                ch_names,
+                label=True,
+                ax=axs[1, 1],
+                alpha_back=0,
+                color=list(cluster_colors),
+            )
+            # axs[1, 1].set_xlim(-1, 1)
+            # axs[1, 1].set_ylim(-1, 1)
+            # axs[1, 1].set_yticks([])
+            # axs[1, 1].set_xticks([])
+            axs[1, 1].axis("off")
+
+            # 3rd plot
+            # Perform clustering, 2 clusters
+            X = np.stack([PfInterest / PfAll, PfHigh / PfAll]).T
+            yhat, clusters = self.clustering_GaussianMixture(n_components=2, X=X)
+            cluster_colors = colors[yhat]
+            axs[2, 0].scatter(X[:, 0], X[:, 1], c=cluster_colors)
+            for i, (x_i, y_i) in enumerate(zip(X[:, 0], X[:, 1])):
+                axs[2, 0].text(
+                    x_i,
+                    y_i,
+                    f"{ch_names[i]}",
+                    fontsize=9,
+                    ha="right",
+                    va="bottom",
+                )
+            axs[2, 0].set_xlabel(r"Power 1-40 Hz / Total [%]", loc="right")
+            axs[2, 0].set_ylabel(r"Power >40 Hz / Total [%]")
+
+            Plotting().show_electrode(
+                eeg_dict.ch_location,
+                ch_names,
+                label=True,
+                ax=axs[2, 1],
+                alpha_back=0,
+                color=list(cluster_colors),
+            )
+            # axs[2,1].set_xlim(-1, 1)
+            # axs[2,1].set_ylim(-1, 1)
+            # axs[2,1].set_yticks([])
+            # axs[2,1].set_xticks([])
+            axs[2, 1].axis("off")
+
+            fig.tight_layout()
+            if path_to_folder:
+                pass
+                # fig.savefig(f"{path_to_folder}data_quality.png")
+                # fig.savefig(f"{path_to_folder}data_quality.pdf")
+                # fig.savefig(f"{path_to_folder}data_quality.svg")
+            plt.show()
