@@ -145,6 +145,7 @@ from BCI2000Tools.Plotting import *
 import mne
 import matplotlib.pyplot as plt
 import matplotlib
+from matplotlib.font_manager import FontProperties
 
 # from matplotlib.colors import LinearSegmentedColormap
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -170,9 +171,10 @@ if __name__ == "__main__":
         print(f"File {opts.file_path} not found! Exiting...\n")
         exit(1)
 
-    # Initialize EEG tools and plotting classes
+    # Initialize EEG and Plotting classes from MotorImageryTools.py
     EEG = mi.EEG()  # Initialize EEG tools
     PLOT = mi.Plotting()  # Initialize Plotting tools
+    QUALITY = mi.SignalQuality()  # Initialize SignalQuality tools
 
     # Store input options into variables
     # does the imported .dat file have a previously cleaned .fif file?
@@ -216,7 +218,6 @@ if __name__ == "__main__":
     text_id = (
         "Sub" + f" $\mathbf{{{sub_name}}}$,  " + "Ses" + f" $\mathbf{{{ses_name}}}$"
     )
-
     # Create a folder using base name, if folder doesn't exist
     path_to_folder = EEG.clean_path(
         EEG.create_folder(path=file_path, folder_name=base_name)
@@ -230,13 +231,17 @@ if __name__ == "__main__":
     # The montage_type is automatically decided by the dimensions of the signal matrix
     # ch_info contains the channel names for that specific montage
     if montage_type == "DSI_24":
-        ch_info = "DSI24_location.txt"
-    elif montage_type == "EGI_64":
-        ch_info = "EGI64_location.txt"
-    elif montage_type == "EGI_128":
-        ch_info = "EGI128_location.txt"
+        ch_info = "DSI24_location.txt"  # DSI-24 ch dry
     elif montage_type == "GTEC_32":
-        ch_info = "GTEC32_location.txt"
+        ch_info = "GTEC32_location.txt"  # g.Nautilus 32 ch gel
+    elif montage_type == "EGI_128":
+        if ch_egi == 64:
+            ch_info = "EGI64_location.txt"  # HydroCel GNS 64 ch gel (adapted from HydroCel GNS 128 ch montage)
+            montage_type == "EGI_64"
+            signal = signal[eeg_dict.id_ch_64_keep]
+            ch_names = list(np.array(ch_names)[eeg_dict.id_ch_64_keep])
+        else:
+            ch_info = "EGI128_location.txt"  # HydroCel GNS 128 ch saline/gel
 
     # Information used later in the PDF report generation
     plot_folder = path_to_folder
@@ -276,6 +281,30 @@ if __name__ == "__main__":
                 conv_dict=eeg_dict.stand1020_to_egi,
             )
 
+            #####################################################################################
+            # THIS IS THE PLACE TO INCLUDE QUALITY OF DATA CHECK
+            # SAVE THE OUTPUT TO THE FOLDER
+            #####################################################################################
+
+            # Channels with PfInterest/PfAll > 1 are bad channels (very high impedence)
+            QUALITY.quality_signal_powers(
+                signal=signal,
+                fs=fs,
+                fDC=0.1,
+                fLow=1,
+                fHigh=40,
+                fPowerLine=60,
+                plot=True,
+                n_components=2,
+                ch_names=ch_set.get_labels(),
+                eeg_dict=eeg_dict,
+                path_to_folder=path_to_folder,
+            )
+            #####################################################################################
+            # THIS IS THE PLACE TO INCLUDE QUALITY OF DATA CHECK
+            # SAVE THE OUTPUT TO THE FOLDER
+            #####################################################################################
+
             # Run PREP for bad channels
             # Don't run Ransac at first, it's ideal to run it after some bad channels are identified, if any
             if prep:
@@ -291,8 +320,8 @@ if __name__ == "__main__":
             # Bandpass filter
             signalFilter = EEG.filter_data(signal, fs, l_freq=fmin, h_freq=fmax)
 
-            # Re-reference only in the case of EGI_128 montage, the other ones we are using are ready to go
-            if montage_type == "EGI_128":
+            # Re-reference only in the case of EGI montage, the other ones we are using are ready to go
+            if montage_type == "EGI_128" or montage_type == "EGI_64":
                 signalFilter, ch_set = EEG.spatial_filter(
                     sfilt="REF",
                     ch_set=ch_set,
@@ -330,7 +359,7 @@ if __name__ == "__main__":
                     isRansac=True,
                 )
 
-            # Mark BAD regions
+            # Mark BAD regions (Done visually)
             EEG.mark_BAD_region(RAW, block=True)
 
             # Summary of BAD regions (confirm the marking)
@@ -357,7 +386,7 @@ if __name__ == "__main__":
             # This file can be imported later to skip all the previous steps
             EEG.save_RAW(RAW=RAW, path=file_path, file_name=base_name, label="")
 
-        else:  # Alternative to `if clean_bool:`
+        else:  # Alternative to `if not clean_bool:`
             # Import a previously saved .fif file
             RAW, montage, fs = EEG.import_file_fif(
                 path=file_path, file_name=base_name + ".fif"
@@ -372,13 +401,20 @@ if __name__ == "__main__":
                 ]
             )
 
-            # There is a little problem with EGI_128 montage since the location of those electrodes is not known by ChannelSet
+            # There is a little problem with EGI montage since the location of those electrodes is not known by ChannelSet
             # We need to manually re-reference like we did before to the average of the mastoids
             # Note: only the ChannelSet needs to be re-referenced, the signal matrtix is already ok since it's imported from before
             # This is manually done here
-            if montage_type == "EGI_128":
+            if montage_type == "EGI_128" or montage_type == "EGI_64":
                 # Define ChannelSet
-                ch_set = ChannelSet("EGI128_location.txt")
+                if ch_egi == 64:
+                    ch_set = ChannelSet(
+                        "EGI64_location.txt"
+                    )  # HydroCel GNS 64 ch gel (adapted from HydroCel GNS 128 ch montage)
+                else:
+                    ch_set = ChannelSet(
+                        "EGI128_location.txt"
+                    )  # HydroCel GNS 128 ch saline/gel
                 # Re-reference, make sure this is the same as the one done before saving the RAW .fif
                 m = np.array(ch_set.RerefMatrix(new_ref))
                 # Apply re-reference, occurs in place
@@ -502,7 +538,7 @@ if __name__ == "__main__":
         )
 
         print(
-            f"psds_left.shape, psds_left_rest.shape, psds_right.shape, psds_right_rest.shape: {psds_left.shape}, {psds_left_rest.shape}, {psds_right.shape}, {psds_right_rest.shape}"
+            f"psds_left.shape: {psds_left_rest.shape}, psds_left_rest.shape: {psds_left.shape}, psds_right.shape:  {psds_right.shape}, psds_right_rest.shape: {psds_right_rest.shape}"
         )
 
         # Find all channels on the left and right hemispheres (in the subset of central, parietal and frontal channels)
@@ -1600,7 +1636,21 @@ if __name__ == "__main__":
                 ax1.axvline(i, lw=1, ls=":", color="grey", alpha=0.4)
             for i in edges:
                 ax1.axhline(i, lw=1, ls=":", color="grey", alpha=0.4)
-            ax1.legend(loc="lower left")
+            legend = ax1.legend(loc="lower left")
+
+            # Define font properties for bold text
+            bold_font = FontProperties(weight="bold")
+            # Create a legend and make only one label bold
+            for text in legend.get_texts():
+                if ch == "c3":
+                    if (
+                        text.get_text() == "Move Right"
+                        or text.get_text() == "Rest Right"
+                    ):
+                        text.set_fontproperties(bold_font)
+                elif ch == "c4":
+                    if text.get_text() == "Move Left" or text.get_text() == "Rest Left":
+                        text.set_fontproperties(bold_font)
 
             ax1.set_xticks([])
             ax1.set_ylabel("[dB]", loc="top")
@@ -1648,7 +1698,19 @@ if __name__ == "__main__":
                 ax2.axvline(i, lw=1, ls=":", color="grey", alpha=0.4)
             for i in [0.2, 0.4, 0.6, 0.8]:
                 ax2.axhline(i, lw=1, ls=":", color="grey", alpha=0.4)
-            ax2.legend(loc="upper left")
+            legend = ax2.legend(loc="upper left")
+
+            # Define font properties for bold text
+            bold_font = FontProperties(weight="bold")
+            # Create a legend and make only one label bold
+            for text in legend.get_texts():
+                if ch == "c3":
+                    if text.get_text() == "Right":
+                        text.set_fontproperties(bold_font)
+                elif ch == "c4":
+                    if text.get_text() == "Left":
+                        text.set_fontproperties(bold_font)
+
             ax2.set_xlabel("Frequency [Hz]", loc="right")
             ax2.set_ylabel(r"R$^{2}$")
 
