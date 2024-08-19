@@ -365,6 +365,26 @@ if __name__ == "__main__":
             # Summary of BAD regions (confirm the marking)
             EEG.evaluate_BAD_region(RAW, max_duration=fileTime)
 
+            # Grab BAD onset and duration
+            annot = RAW.annotations
+            bad_onset = annot.onset[np.where(annot.description == "BAD_region")]
+            bad_duration = annot.duration[np.where(annot.description == "BAD_region")]
+            # Create a figure and axis
+            fig, ax = plt.subplots(figsize=(10, 2))
+            EEG.visualize_BAD_region(
+                max_duration=fileTime,
+                annotation_onset=bad_onset,
+                annotation_duration=bad_duration,
+                color="red",
+                ax=ax,
+            )
+            # Create a bar to visualize bad areas
+            plt.savefig(f"{path_to_folder}BAD_segments.png", bbox_inches="tight")
+            plt.savefig(f"{path_to_folder}BAD_segments.svg", bbox_inches="tight")
+            plt.show(block=False)
+            plt.pause(pause)
+            plt.close()
+
             # Add Stimuli to RAW
             EEG.make_RAW_stim(RAW, states)
 
@@ -626,8 +646,8 @@ if __name__ == "__main__":
         plt.plot(r0 * np.cos(theta), r0 * np.sin(theta), color="black", lw=1)
         plt.plot(r0 * np.cos(theta), -r0 * np.sin(theta), color="black", lw=1)
         # Save the plot
-        plt.savefig(f"{path_to_folder}target_electrodes.png")
-        plt.savefig(f"{path_to_folder}target_electrodes.svg")
+        plt.savefig(f"{path_to_folder}target_electrodes.png", bbox_inches="tight")
+        plt.savefig(f"{path_to_folder}target_electrodes.svg", bbox_inches="tight")
         plt.show(block=False)
         plt.pause(pause)
         plt.close()
@@ -745,8 +765,8 @@ if __name__ == "__main__":
                 labels.append(f"{freq_band[i]}-{freq_band[i+1]-1} Hz (B)")
 
         plt.tight_layout()
-        plt.savefig(f"{path_to_folder}test_left_{resolution}_Hz.png")
-        plt.savefig(f"{path_to_folder}test_left_{resolution}_Hz.svg")
+        plt.savefig(f"{path_to_folder}test_left_{resolution}_Hz.png", bbox_inches="tight")
+        plt.savefig(f"{path_to_folder}test_left_{resolution}_Hz.svg", bbox_inches="tight")
         plt.show(block=False)
         plt.pause(pause)
         plt.close()
@@ -848,8 +868,8 @@ if __name__ == "__main__":
                 p_right.append(p)
 
         plt.tight_layout()
-        plt.savefig(f"{path_to_folder}test_right_{resolution}_Hz.png")
-        plt.savefig(f"{path_to_folder}test_right_{resolution}_Hz.svg")
+        plt.savefig(f"{path_to_folder}test_right_{resolution}_Hz.png", bbox_inches="tight")
+        plt.savefig(f"{path_to_folder}test_right_{resolution}_Hz.svg", bbox_inches="tight")
         plt.show(block=False)
         plt.pause(pause)
         plt.close()
