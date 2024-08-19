@@ -412,6 +412,26 @@ if __name__ == "__main__":
                 path=file_path, file_name=base_name + ".fif"
             )
 
+            # Grab BAD onset and duration
+            annot = RAW.annotations
+            bad_onset = annot.onset[np.where(annot.description == "BAD_region")]
+            bad_duration = annot.duration[np.where(annot.description == "BAD_region")]
+            # Create a figure and axis
+            fig, ax = plt.subplots(figsize=(10, 2))
+            EEG.visualize_BAD_region(
+                max_duration=fileTime,
+                annotation_onset=bad_onset,
+                annotation_duration=bad_duration,
+                color="red",
+                ax=ax,
+            )
+            # Create a bar to visualize bad areas
+            plt.savefig(f"{path_to_folder}BAD_segments.png", bbox_inches="tight")
+            plt.savefig(f"{path_to_folder}BAD_segments.svg", bbox_inches="tight")
+            plt.show(block=False)
+            plt.pause(pause)
+            plt.close()
+
             # Define ChannelSet using RAW.info
             # ChannelSet comes from BCI2000Tools, it contains information regarding a specific montage and can be used for transformation of the signal matrix
             ch_set = ChannelSet(
@@ -765,8 +785,12 @@ if __name__ == "__main__":
                 labels.append(f"{freq_band[i]}-{freq_band[i+1]-1} Hz (B)")
 
         plt.tight_layout()
-        plt.savefig(f"{path_to_folder}test_left_{resolution}_Hz.png", bbox_inches="tight")
-        plt.savefig(f"{path_to_folder}test_left_{resolution}_Hz.svg", bbox_inches="tight")
+        plt.savefig(
+            f"{path_to_folder}test_left_{resolution}_Hz.png", bbox_inches="tight"
+        )
+        plt.savefig(
+            f"{path_to_folder}test_left_{resolution}_Hz.svg", bbox_inches="tight"
+        )
         plt.show(block=False)
         plt.pause(pause)
         plt.close()
@@ -868,8 +892,12 @@ if __name__ == "__main__":
                 p_right.append(p)
 
         plt.tight_layout()
-        plt.savefig(f"{path_to_folder}test_right_{resolution}_Hz.png", bbox_inches="tight")
-        plt.savefig(f"{path_to_folder}test_right_{resolution}_Hz.svg", bbox_inches="tight")
+        plt.savefig(
+            f"{path_to_folder}test_right_{resolution}_Hz.png", bbox_inches="tight"
+        )
+        plt.savefig(
+            f"{path_to_folder}test_right_{resolution}_Hz.svg", bbox_inches="tight"
+        )
         plt.show(block=False)
         plt.pause(pause)
         plt.close()
