@@ -547,6 +547,53 @@ class EEG:
             f" --> {label}: {len(bad_regions_id)} sections, ~{round(sum(bad_regions_id),1)} s [{round(sum(bad_regions_id)/max_duration*100,1)}%] --> Bad channels: {RAW.info['bads']}"
         )
 
+    def visualize_BAD_region(
+        self,
+        max_duration=None,
+        annotation_onset=None,
+        annotation_duration=None,
+        color="red",
+        ax=None,
+    ):
+        """
+        Create a bar to visualize the presence and location of the BAD_region segments
+
+        Args:
+            max_duration (float): The maximum duration expected for the data, used to calculate the percentage of data
+            annotation_onset (np.array): Array with onset timing
+            annotation_duration (np.array): Array with duration timing
+
+        Returns:
+            None
+        """
+        # Percent of file classified as BAD
+        total_percent = np.sum(annotation_duration) / max_duration * 100
+
+        # Plot the whole experiment timeline as a bar
+        ax.barh(0, max_duration, color="lightgray", edgecolor="black")
+        # Highlight the bad segments in red
+        for onset, duration in zip(annotation_onset, annotation_duration):
+            ax.barh(0, duration, left=onset, color=color, edgecolor="black")
+        # Set labels and title
+        ax.set_yticks([])
+        ax.set_xlim(0, max_duration)
+        ax.set_xlabel("Time [s]")
+        # Remove the top and side spines
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+        ax.spines["left"].set_visible(False)
+
+        # Add a text box at the end of the bar
+        text_str = f"Bad Segments: {total_percent:.2f}%"
+        ax.text(
+            max_duration,
+            0.5,
+            text_str,
+            va="center",
+            ha="right",
+            bbox=dict(facecolor="white", edgecolor="black"),
+        )
+
     def make_annotation_MI(
         self,
         RAW=None,
@@ -2487,7 +2534,7 @@ class SignalQuality:
                 )
 
             # Plot the scatterplots for the combinations
-            fig, axs = plt.subplots(3, 2, figsize=(10, 15))
+            fig, axs = plt.subplots(2, 3, figsize=(12, 8))
             # 1st plot
             # Perform clustering, 2 clusters
             X = np.stack([PfDC / PfAll, PfLine / PfAll]).T
@@ -2510,24 +2557,24 @@ class SignalQuality:
                 eeg_dict.ch_location,
                 ch_names,
                 label=True,
-                ax=axs[0, 1],
+                ax=axs[1, 0],
                 alpha_back=0,
                 color=list(cluster_colors),
             )
-            # axs[0,1].set_xlim(-1, 1)
-            # axs[0,1].set_ylim(-1, 1)
-            # axs[0,1].set_yticks([])
-            # axs[0,1].set_xticks([])
-            axs[0, 1].axis("off")
+            # axs[1,0].set_xlim(-1, 1)
+            # axs[1,0].set_ylim(-1, 1)
+            # axs[1,0].set_yticks([])
+            # axs[1,0].set_xticks([])
+            axs[1, 0].axis("off")
 
             # 2nd plot
             # Perform clustering, 2 clusters
             X = np.stack([PfInterest / PfAll, PfLow / PfAll]).T
             yhat, clusters = self.clustering_GaussianMixture(n_components=2, X=X)
             cluster_colors = colors[yhat]
-            axs[1, 0].scatter(X[:, 0], X[:, 1], c=cluster_colors)
+            axs[0, 1].scatter(X[:, 0], X[:, 1], c=cluster_colors)
             for i, (x_i, y_i) in enumerate(zip(X[:, 0], X[:, 1])):
-                axs[1, 0].text(
+                axs[0, 1].text(
                     x_i,
                     y_i,
                     f"{ch_names[i]}",
@@ -2535,8 +2582,8 @@ class SignalQuality:
                     ha="right",
                     va="bottom",
                 )
-            axs[1, 0].set_xlabel(r"Power 1-40 Hz / Total [%]", loc="right")
-            axs[1, 0].set_ylabel(r"Power >1 Hz / Total [%]")
+            axs[0, 1].set_xlabel(r"Power 1-40 Hz / Total [%]", loc="right")
+            axs[0, 1].set_ylabel(r"Power >1 Hz / Total [%]")
 
             Plotting().show_electrode(
                 eeg_dict.ch_location,
@@ -2546,10 +2593,10 @@ class SignalQuality:
                 alpha_back=0,
                 color=list(cluster_colors),
             )
-            # axs[1, 1].set_xlim(-1, 1)
-            # axs[1, 1].set_ylim(-1, 1)
-            # axs[1, 1].set_yticks([])
-            # axs[1, 1].set_xticks([])
+            # axs[1,1].set_xlim(-1, 1)
+            # axs[1,1].set_ylim(-1, 1)
+            # axs[1,1].set_yticks([])
+            # axs[1,1].set_xticks([])
             axs[1, 1].axis("off")
 
             # 3rd plot
@@ -2557,9 +2604,9 @@ class SignalQuality:
             X = np.stack([PfInterest / PfAll, PfHigh / PfAll]).T
             yhat, clusters = self.clustering_GaussianMixture(n_components=2, X=X)
             cluster_colors = colors[yhat]
-            axs[2, 0].scatter(X[:, 0], X[:, 1], c=cluster_colors)
+            axs[0, 2].scatter(X[:, 0], X[:, 1], c=cluster_colors)
             for i, (x_i, y_i) in enumerate(zip(X[:, 0], X[:, 1])):
-                axs[2, 0].text(
+                axs[0, 2].text(
                     x_i,
                     y_i,
                     f"{ch_names[i]}",
@@ -2567,27 +2614,26 @@ class SignalQuality:
                     ha="right",
                     va="bottom",
                 )
-            axs[2, 0].set_xlabel(r"Power 1-40 Hz / Total [%]", loc="right")
-            axs[2, 0].set_ylabel(r"Power >40 Hz / Total [%]")
+            axs[0, 2].set_xlabel(r"Power 1-40 Hz / Total [%]", loc="right")
+            axs[0, 2].set_ylabel(r"Power >40 Hz / Total [%]")
 
             Plotting().show_electrode(
                 eeg_dict.ch_location,
                 ch_names,
                 label=True,
-                ax=axs[2, 1],
+                ax=axs[1, 2],
                 alpha_back=0,
                 color=list(cluster_colors),
             )
-            # axs[2,1].set_xlim(-1, 1)
-            # axs[2,1].set_ylim(-1, 1)
-            # axs[2,1].set_yticks([])
-            # axs[2,1].set_xticks([])
-            axs[2, 1].axis("off")
+            # axs[1,2].set_xlim(-1, 1)
+            # axs[1,2].set_ylim(-1, 1)
+            # axs[1,2].set_yticks([])
+            # axs[1,2].set_xticks([])
+            axs[1, 2].axis("off")
 
             fig.tight_layout()
             if path_to_folder:
-                pass
-                # fig.savefig(f"{path_to_folder}data_quality.png")
-                # fig.savefig(f"{path_to_folder}data_quality.pdf")
-                # fig.savefig(f"{path_to_folder}data_quality.svg")
+                fig.savefig(f"{path_to_folder}data_quality.png", bbox_inches="tight")
+                fig.savefig(f"{path_to_folder}data_quality.pdf", bbox_inches="tight")
+                fig.savefig(f"{path_to_folder}data_quality.svg", bbox_inches="tight")
             plt.show()
