@@ -13,7 +13,13 @@ from PIL import Image
 
 class generate_pdf:
     def __init__(
-        self, plot_folder, montage_name, resolution, date_test=None, version="N/A"
+        self,
+        plot_folder,
+        montage_name,
+        resolution,
+        yob=None,
+        date_test=None,
+        version="N/A",
     ):
         # Import folder and set up information regarding the subject
         self.plot_folder = plot_folder
@@ -36,6 +42,7 @@ class generate_pdf:
             self.reference = "Avg Mastoids"
 
         self.resolution = resolution
+        self.yob = yob
         self.date_test = date_test
         self.version = version
 
@@ -53,9 +60,6 @@ class generate_pdf:
         else:
             self.condition = "N/A"
 
-        # Subject's age
-        self.sub_age = self.prompt_for_age()
-
         # Get today's date
         today = date.today()
         self.formatted_date = today.strftime("%Y-%m-%d")
@@ -63,6 +67,12 @@ class generate_pdf:
         # Measurement date
         if not self.date_test:
             self.date_test = self.prompt_for_date()
+
+        # Subject's age
+        if not self.yob:
+            self.sub_age = self.prompt_for_age()
+        else:
+            self.sub_age = int(self.date_test.split("-")[0]) - int(self.yob)
 
         # Montage (they are now provided during class initialization)
         # self.montage_name = str(input("Enter montage name [DSI 24, GTEC 32, EGI 64, EGI 128]: "))
