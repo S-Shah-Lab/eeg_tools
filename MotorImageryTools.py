@@ -2525,7 +2525,7 @@ class SignalQuality:
         if plot:
             # Assign a color to each cluster
             colors = np.array(
-                ["r", "g", "b", "y", "c", "m", "k"]
+                ["b", "orange", "r", "g", "c", "m", "k"]
             )  # Example color array, expand or change as needed
             # Ensure we have enough colors
             if len(colors) < n_components:
@@ -2552,6 +2552,9 @@ class SignalQuality:
                 )
             axs[0, 0].set_xlabel(r"Power 0.1-1 Hz / Total [%]", loc="right")
             axs[0, 0].set_ylabel(r"Power Line / Total [%]")
+            axs[0, 0].set_xlim(-0.05, 1.05)
+            axs[0, 0].set_ylim(-0.05, 1.05)
+
             # Need to pass same colors
             Plotting().show_electrode(
                 eeg_dict.ch_location,
@@ -2584,6 +2587,8 @@ class SignalQuality:
                 )
             axs[0, 1].set_xlabel(r"Power 1-40 Hz / Total [%]", loc="right")
             axs[0, 1].set_ylabel(r"Power >1 Hz / Total [%]")
+            axs[0, 1].set_xlim(-0.05, 1.05)
+            axs[0, 1].set_ylim(-0.05, 1.05)
 
             Plotting().show_electrode(
                 eeg_dict.ch_location,
@@ -2616,6 +2621,8 @@ class SignalQuality:
                 )
             axs[0, 2].set_xlabel(r"Power 1-40 Hz / Total [%]", loc="right")
             axs[0, 2].set_ylabel(r"Power >40 Hz / Total [%]")
+            axs[0, 2].set_xlim(-0.05, 1.05)
+            axs[0, 2].set_ylim(-0.05, 1.05)
 
             Plotting().show_electrode(
                 eeg_dict.ch_location,

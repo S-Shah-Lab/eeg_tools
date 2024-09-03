@@ -132,6 +132,14 @@ if __name__ == "__main__":
         default=128,
         help="Specifies the number of channels to use in case the EGI montage is found, this is useful to break the duality of 128 channels or only a subset of 64 channels with the same montage",
     )
+    parser.add_argument(
+        "-y",
+        "--yob",
+        metavar="yob",
+        type=int,
+        default=None,
+        help="Year of birth of the subject",
+    )
 
     opts = parser.parse_args()
 
@@ -209,6 +217,8 @@ if __name__ == "__main__":
     new_ref = opts.new_ref
     # number of channels used in case of EGI 128 montage
     ch_egi = opts.ch_egi
+    # year of birth of the subject
+    yob = opts.yob
 
     # Extract base name from file
     base_name, extension = os.path.splitext(file_name)
@@ -1791,6 +1801,7 @@ if __name__ == "__main__":
             plot_folder,
             montage_name,
             resolution,
+            yob=yob,
             date_test=date_test,
             version=__version__,
         )
@@ -1803,6 +1814,7 @@ if __name__ == "__main__":
             plot_folder,
             montage_name,
             resolution,
+            yob=yob,
             date_test=date_test,
             version=__version__,
         )
