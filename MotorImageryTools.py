@@ -940,7 +940,7 @@ class EEG:
         # Select the appropriate standard montage based on the specified type
         if montage_type in ["DSI_24", "GTEC_32"]:
             montage = mne.channels.make_standard_montage("standard_1020")
-        elif montage_type == "EGI_128":
+        elif montage_type in ["EGI_64", "EGI_128"]:
             montage = mne.channels.make_standard_montage("GSN-HydroCel-129")
 
         montage.ch_names = [x.lower() for x in montage.ch_names]
@@ -948,7 +948,7 @@ class EEG:
         idx = []
         # Determine indices for the channels to show, using conversion dictionary if provided
         for ch in ch_to_show:
-            if montage_type == "EGI_128":
+            if montage_type in ["EGI_64", "EGI_128"]:
                 idx.append(montage.ch_names.index(conv_dict[ch.lower()]))
             else:
                 idx.append(montage.ch_names.index(ch.lower()))

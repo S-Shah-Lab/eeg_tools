@@ -247,7 +247,7 @@ if __name__ == "__main__":
     elif montage_type == "EGI_128":
         if ch_egi == 64:
             ch_info = "EGI64_location.txt"  # HydroCel GNS 64 ch gel (adapted from HydroCel GNS 128 ch montage)
-            montage_type == "EGI_64"
+            montage_type = "EGI_64"
             signal = signal[eeg_dict.id_ch_64_keep]
             ch_names = list(np.array(ch_names)[eeg_dict.id_ch_64_keep])
         else:
