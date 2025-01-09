@@ -226,7 +226,7 @@ if __name__ == "__main__":
     ses_name = base_name.split("ses-")[1].split("_")[0]
     # String used in some plots for labeling
     text_id = (
-        "Sub" + f" $\mathbf{{{sub_name}}}$,  " + "Ses" + f" $\mathbf{{{ses_name}}}$"
+        "Sub" + f" $\\mathbf{{{sub_name}}}$,  " + "Ses" + f" $\\mathbf{{{ses_name}}}$"
     )
     # Create a folder using base name, if folder doesn't exist
     path_to_folder = EEG.clean_path(
@@ -938,17 +938,17 @@ if __name__ == "__main__":
         xDown_values, x_values, xUp_values = montecarlo_error(p_left, nSim)
         # ---------
         ax1.set_title("Open/Close Left", fontsize=12, loc="left", weight="bold")
-        ax1.scatter(x_values, y, color="red", marker="o")
+        ax1.scatter(x_values, y, color="black", marker="o")
         # Add confidence interval on true p
         for i in range(len(y)):
             ax1.fill_betweenx(
                 [y[i] - deltay, y[i] + deltay],
                 xDown_values[i],
                 xUp_values[i],
-                color="red",
+                color="gray",
                 alpha=0.3,
             )
-        ax1.hlines(y, 0, x_values, colors="red", lw=1.5, alpha=1)
+        ax1.hlines(y, 0, x_values, colors="black", lw=1.5, alpha=1)
         ax1.set_xlabel(r"-log(p)")
         ax1.set_xlim(ax1.get_xlim()[::-1])  # Reverse the x-axis for left plot
         ax1.set_xlim(right=0, left=6)
@@ -977,17 +977,17 @@ if __name__ == "__main__":
         xDown_values, x_values, xUp_values = montecarlo_error(p_right, nSim)
         # ---------
         ax2.set_title("Open/Close Right", fontsize=12, loc="right", weight="bold")
-        ax2.scatter(x_values, y, color="blue", marker="o")
+        ax2.scatter(x_values, y, color="black", marker="o")
         # Add confidence interval on true p
         for i in range(len(y)):
             ax2.fill_betweenx(
                 [y[i] - deltay, y[i] + deltay],
                 xDown_values[i],
                 xUp_values[i],
-                color="blue",
+                color="gray",
                 alpha=0.3,
             )
-        ax2.hlines(y, 0, x_values, colors="blue", lw=1.5, alpha=1)
+        ax2.hlines(y, 0, x_values, colors="black", lw=1.5, alpha=1)
         ax2.set_xlabel(r"-log(p)")
         ax2.set_xlim(left=0, right=6)
         ax1.set_ylim(y_min, y_max)
@@ -1038,11 +1038,11 @@ if __name__ == "__main__":
                 [y[i] - deltay, y[i] + deltay],
                 xDown_values[i],
                 xUp_values[i],
-                color="red",
+                color="gray",
                 alpha=0.3,
             )
-        ax.hlines(y, 0, x_values, colors="crimson", lw=3, alpha=1)
-        ax.scatter(x_values, y, color="crimson", marker="o", s=50)
+        ax.hlines(y, 0, x_values, colors="black", lw=3, alpha=1)
+        ax.scatter(x_values, y, color="black", marker="o", s=50)
         # Draw bars
         # lower_errors = [x-y for x,y in zip(x_values, xUp_values)]  # Lower error values
         # upper_errors = [x-y for x,y in zip(xDown_values, x_values)]  # Upper error values
@@ -1111,11 +1111,11 @@ if __name__ == "__main__":
                 [y[i] - deltay, y[i] + deltay],
                 xDown_values[i],
                 xUp_values[i],
-                color="blue",
+                color="gray",
                 alpha=0.3,
             )
-        ax.hlines(y, 0, x_values, colors="navy", lw=3, alpha=1)
-        ax.scatter(x_values, y, color="navy", marker="o", s=50)
+        ax.hlines(y, 0, x_values, colors="black", lw=3, alpha=1)
+        ax.scatter(x_values, y, color="black", marker="o", s=50)
         # Draw bars
         # lower_errors = [x-y for x,y in zip(x_values, xUp_values)]  # Lower error values
         # upper_errors = [x-y for x,y in zip(xDown_values, x_values)]  # Upper error values

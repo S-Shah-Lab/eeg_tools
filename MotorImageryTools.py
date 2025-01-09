@@ -1216,7 +1216,7 @@ class EEG:
             n_per_seg=nPerSegment,
             average=None,
             window="hann",
-            output="power",
+            # output="power", # only past version 1.4, before that it's power by default
             verbose=verbose,
         ).get_data()
 
