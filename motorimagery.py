@@ -1,9 +1,9 @@
 """
-This script runs the major parts of the motor imagery paradigm analysis. 
+This script runs the major parts of the motor imagery paradigm analysis.
 
 1) It naturally cleans the input file with minimum input from the user (it manually requires you to visually select the BAD regions)
 
-2) It splits the EEG sections into epochs and extracts PSDs using the Welch method. 
+2) It splits the EEG sections into epochs and extracts PSDs using the Welch method.
 
 3) It converts PSDs values from chosen frequency bands into signed-r2 coeffiecients and performs statistical tests using permutation and bootstrap methods to extract p-values
 
@@ -593,15 +593,14 @@ if __name__ == "__main__":
 
         # Find all channels on the left and right hemispheres (in the subset of central, parietal and frontal channels)
         isLeft_ch = [
-            x
-            for x in eeg_dict.ch_central + eeg_dict.ch_parietal + eeg_dict.ch_frontal
-            if x in EEG.find_ch_left(eeg_dict.ch_location)
+            x for x in eeg_dict.ch_motor if x in EEG.find_ch_left(eeg_dict.ch_location)
         ]
         isRight_ch = [
-            x
-            for x in eeg_dict.ch_central + eeg_dict.ch_parietal + eeg_dict.ch_frontal
-            if x in EEG.find_ch_right(eeg_dict.ch_location)
+            x for x in eeg_dict.ch_motor if x in EEG.find_ch_right(eeg_dict.ch_location)
         ]
+
+        isLeft_ch = np.unique(isLeft_ch)
+        isRight_ch = np.unique(isRight_ch)
 
         # Convert ch_set channels into an array of True of False based on the ones to consider
         isLeft = np.array(

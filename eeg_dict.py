@@ -731,6 +731,50 @@ ch_parietal = [
 
 ch_parietal_occipital = ["e66", "po3", "poz", "e71", "po7", "e84", "po4", "e76", "po8"]
 
+# This is a merge of central and parietal channels but some are excluded
+ch_motor = [
+    "fcz",
+    "cz",
+    "pz",
+    "poz",
+    "cpz",
+    # "e110",    #"e35",
+    "fc4",
+    "fc3",
+    "fc2" "fc1",
+    "c6",
+    "c5",
+    "c4",
+    "c3",
+    "c2",
+    "c1",
+    # "e106",    #"e7",
+    # "e80",     #"e31",
+    # "p8",      #"p7",
+    "cp6",
+    "cp5",
+    "cp4",
+    "cp3",
+    "cp2",
+    "cp1",
+    # "p6",      #"p5",
+    "p4",
+    "p3",
+    "p2",
+    "p1",
+    "e86",
+    "e53",
+    "e79",
+    "e54",
+    # "e78",     #"e61",
+    # "po4",     #"po3",
+    # "po8",     #"po7",
+    # "p10",     #"p9",
+    # "e84",     #"e66",
+    # "e76",     #"e71",
+    # "t6",      #"t5",
+]
+
 
 id_ch_64_keep = [
     0,
