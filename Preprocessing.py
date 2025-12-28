@@ -637,7 +637,7 @@ class EEGPreprocessor:
             ax.spines["left" ].set_visible(False)
 
             # Add a text box at the end of the bar
-            text_str = f"Bad Segments: {total_percent:.2f}%"
+            text_str = f"Discarded file (Time): {total_percent:.2f}%"
             ax.text(
                 fileTime,
                 0.5,
