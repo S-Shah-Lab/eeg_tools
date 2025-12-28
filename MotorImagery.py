@@ -2153,7 +2153,7 @@ class EEGMotorImagery:
         figsize: Tuple[float, float] = (8.0, 4.0),
     ):
         """
-        Forest plot: observed effect per band with bootstrap CI,
+        Forest plot: observed $\Delta$ per band with bootstrap CI,
         for left_vs_left_rest and right_vs_right_rest
         """
         results = self._ensure_stats_results(transf=transf)
@@ -2192,27 +2192,38 @@ class EEGMotorImagery:
 
         fig, ax = plt.subplots(1, 1, figsize=figsize)
 
-        # Left effects
+        # Left $\Delta$
         ax.errorbar(
             obs_l, y - 0.12,
             xerr=[obs_l - lo_l, hi_l - obs_l],
             fmt="o", capsize=3, label="Left hand (vs rest)"
         )
-        # Right effects
+        # Right $\Delta$
         ax.errorbar(
             obs_r, y + 0.12,
             xerr=[obs_r - lo_r, hi_r - obs_r],
             fmt="o", capsize=3, label="Right hand (vs rest)"
         )
 
-        ax.axvline(0.0, linestyle="--", linewidth=1, color='grey', label='No effect')
+        ax.axvline(0.0, linestyle="--", linewidth=1, color='grey', label=r'$\Delta = 0$')
         ax.set_yticks(y)
         ax.set_yticklabels([bk.replace("Hz", " Hz") for bk in band_keys])
         ax.invert_yaxis()  # first bands at the top
-        ax.set_xlabel("Observed effect")
-        ax.set_title(f"Band-wise effects with {ci:.0f}% CI", loc="left")
+        ax.set_xlabel(r"Observed $\Delta$", loc='right')
+        ax.set_title("Band-wise observed value with 95% CI", loc="left", fontsize=10)
         ax.legend(frameon=False)
         fig.tight_layout()
+
+
+        # Explain $\Delta$ at the bottom of the figure
+        delta_note1 = (
+            r"$\Delta$ = $\sum$ ipsilateral signed $r^2$ "
+            r"$-$ $\sum$ contralateral signed $r^2$"
+        )
+        fig.subplots_adjust(bottom=0.2)
+        fig.text(0.01, 0.05, delta_note1, ha="left", va="bottom", fontsize=9)
+        delta_note2 = r"Computed from band-averaged PSD (task vs rest) using target channels"
+        fig.text(0.01, 0.02, delta_note2, ha="left", va="bottom", fontsize=9)
 
         if self.save_path is not None:
             fig.savefig(os.path.join(self.save_path, "band_effect.png"), bbox_inches="tight")
