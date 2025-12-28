@@ -1,4 +1,4 @@
-from reportlab.lib.pagesizes import letter, A4
+from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from reportlab.lib import colors
 from reportlab.graphics import renderPDF
@@ -8,124 +8,226 @@ import xml.etree.ElementTree as ET
 import os
 import datetime
 from datetime import date
+from pathlib import Path
 from PIL import Image
+from typing import Literal, Optional, Tuple, Dict
 
 
-class generate_pdf:
+XAnchor = Literal["left",     "center", "right"]
+YAnchor = Literal["bottom",   "center", "top"  ]
+FitMode = Literal["preserve", "stretch"        ]
+
+
+class MotorImageryPdfReport:
     def __init__(
-        self,
-        plot_folder,
-        montage_name,
-        resolution,
-        yob=None,
-        date_test=None,
-        version="N/A",
+        self, 
+        plot_folder: str, 
+        helper_folder: str, 
+        date_test: str = 'N/A', 
+        montage_name: str = 'N/A', 
+        resolution: int = 1,
+        age_at_test: str = "N/A",
+        save_folder: str = None,
     ):
-        # Import folder and set up information regarding the subject
-        self.plot_folder = plot_folder
-
-        # Flags to make structural points and line visible
+        
+        self.plot_folder   = plot_folder
+        self.helper_folder = helper_folder
+        
+        self.show_all_lines  = False
         self.show_all_points = False
-        self.show_all_lines = False
-
-        if montage_name == "DSI 24":
-            self.montage_name = "DSI-24"
-            self.reference = "Avg Mastoids"
-        elif montage_name == "GTEC 32":
-            self.montage_name = "g.Nautilus 32"
-            self.reference = "Rx Ear Lobe"
-        elif montage_name == "EGI 64":
-            self.montage_name = "HydroCel GNS 64"
-            self.reference = "Avg Mastoids"
-        elif montage_name == "EGI 128":
-            self.montage_name = "HydroCel GNS 128"
-            self.reference = "Avg Mastoids"
-
-        self.resolution = resolution
-        self.yob = yob
-        self.date_test = date_test
-        self.version = version
-
-        self.base_name = self.plot_folder.split("/")[-2]
-        # Subject's name
-        self.sub_name = self.base_name.split("sub-")[1].split("_ses")[0]
-        # Subject's session
-        self.ses_name = self.base_name.split("ses-")[1].split("_")[0]
-
-        # Subject's condition
-        if "HC" in self.sub_name:
-            self.condition = "HC"
-        elif "BI" in self.sub_name:
-            self.condition = "TBI"
-        else:
-            self.condition = "N/A"
-
-        # Get today's date
+        
         today = date.today()
         self.formatted_date = today.strftime("%Y-%m-%d")
-
-        # Measurement date
-        if not self.date_test:
-            self.date_test = self.prompt_for_date()
-
-        # Subject's age
-        if not self.yob:
-            self.sub_age = self.prompt_for_age()
+        
+        self.version        = 'N/A'
+        
+        self.base_name      = self.plot_folder.split("/")[-1]
+        self.sub_name       = self.base_name.split("sub-")[1].split("_ses")[0]
+        self.ses_name       = self.base_name.split("ses-")[1].split("_")[0]
+        
+        self.date_test      = date_test
+        
+        if montage_name   == "DSI_24":
+            self.montage_name = "DSI 24 chs"
+        elif montage_name == "GTEC_32":
+            self.montage_name = "g.Nautilus 32 chs"
+        elif montage_name == "EGI_64":
+            self.montage_name = "HydroCel GNS 64 chs"
+        elif montage_name == "EGI_128":
+            self.montage_name = "HydroCel GNS 128 chs"
         else:
-            self.sub_age = int(self.date_test.split("-")[0]) - int(self.yob)
+            self.montage_name = "N/A"
 
-        # Montage (they are now provided during class initialization)
-        # self.montage_name = str(input("Enter montage name [DSI 24, GTEC 32, EGI 64, EGI 128]: "))
+        self.resolution  = resolution
+        self.age_at_test = age_at_test
+        self.save_folder = save_folder
+        self.output_name = f"mcf_report_{self.base_name}.pdf"
+        
+        self.spatial_filter = 'Surface Laplacian'
+        
+        if "HC" in self.sub_name:
+            self.condition = "HC"
+        elif "TBI" in self.sub_name:
+            self.condition = "TBI"
+        else:
+            self.condition = 'N/A'
+        
+        
+        
+        
+        
+        
+        self._create_canvas()
+        
+        # Page 1
+        self._get_canvas_dims()
+        self._create_corner_points()
+        self._create_page_sections()
+        self._generate_header()
+        
+        self._plot_timeline()
+        self._plot_topoplots()
+        self._plot_band_effects()
+        self._next_page() # ---------------------
+        
+        # Page 2
+        self._create_corner_points()
+        self._create_page_sections()
+        self._generate_header()
+        
+        self._plot_brain()
+        self._plot_psds()
+        self._next_page() # ---------------------
+        
+        # Page 3
+        self._create_corner_points()
+        self._create_page_sections()
+        self._generate_header()
+        
+        self._plot_stat_dist()
+        self._plot_bridged_candidates()
+        
+        
+        # Save the canvas
+        self.c.save()
+        
 
-        # Resolution (they are now provided during class initialization)
-        # self.resolution = str(input("Enter the PSD resolution (e.g. 1): "))
+    # -------------------------------------------------------------------------
+    # METHODS FOR STRUCTURAL BUILDING
+    # -------------------------------------------------------------------------
+    # Functions to find specific coordinates using anchor points and distances (dx or dy) from them
+    # Useful for navigating a PDF file, assuming the bottom left corner to be the point (0,0)
+    @ staticmethod
+    def move_right_by(x: float, dx: float) -> float:
+        """Move a point with coordinate x to the right by dx"""
+        return x + dx
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # BEGINNING OF CANVAS
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    @ staticmethod
+    def move_left_by(x: float, dx: float) -> float:
+        """Move a point with coordinate x to the left by dx"""
+        return x - dx
+
+    @ staticmethod
+    def move_up_by(y: float, dy: float) -> float:
+        """Move a point with coordinate y upward by dy"""
+        return y + dy
+
+    @ staticmethod
+    def move_down_by(y: float, dy: float) -> float:
+        """Move a point with coordinate y downward by dy"""
+        return y - dy
+
+    def show_key_point(self, name, x, y, show=True) -> None:
+        """Generate anchor point at given coordinates on the PDF"""
+        self.dict_alph[name] = [x, y]
+        if show:
+            self.c.setFont("Helvetica", 16) # Set the font for text display
+            self.c.drawString(x, y, name)   # Draw the name at the specified coordinates
+
+    def draw_hline(self, x1, x2, y, color=colors.black, line_width=1, return_coord=True):
+        """Draws a horizontal line between x1 and x2 at a fixed y"""
+        self.c.setStrokeColor(color)    # Set the line color
+        self.c.setLineWidth(line_width) # Set the line width
+        self.c.line(x1, y, x2, y)       # Draws a line
+        if return_coord:
+            return {'x1': x1, 'x2': x2, 'y': y}
+
+    def draw_vline(self, x, y1, y2, color=colors.black, line_width=1, return_coord=True):
+        """Draws a vertical line between y1 and y2 at a fixed x"""
+        self.c.setStrokeColor(color)    # Set the line color
+        self.c.setLineWidth(line_width) # Set the line width
+        self.c.line(x, y1, x, y2)       # Draws a line
+        if return_coord:
+            return {'x': x, 'y1': y1, 'y2': y2}
+
+    def draw_dline(self, x1, y1, x2, y2, color=colors.black, line_width=1, return_coord=True):
+        """Draws a diagonal line from (x1, y1) to (x2, y2)"""
+        self.c.setStrokeColor(color)    # Set the line color
+        self.c.setLineWidth(line_width) # Set the line width
+        self.c.line(x1, y1, x2, y2)     # Draw the line
+        if return_coord:
+            return {'x1': x1, 'x2': x2, 'y1': y1, 'y2': y2}
+
+    def _create_canvas(self) -> None:
+        """ TODO """
         # Set up the canvas
         self.c = canvas.Canvas(
-            f"{self.plot_folder}MI_report_sub-{self.sub_name}_ses-{self.ses_name}.pdf",
+            os.path.join(self.save_folder, self.output_name),
             pagesize=letter,
         )
+        
+    def _next_page(self) -> None:
+        """ TODO """
+        self.c.showPage()
+        
+    def _get_canvas_dims(self, margin: int = 15) -> None:
+        """ TODO """
         # Canvas dimensions
         width, height = letter  # Get the dimensions of the page
         xmin = 0
         xmax = width  # 612
-        self.xmid = (xmax - xmin) / 2
-        ymin = height  # 792
-        ymax = 0
-        # Distance from the canvas edges
-        delta = 15
+        xmid = (xmax - xmin) / 2
+        ymax = height  # 792
+        ymin = 0
+        ymid = abs(ymax - ymin) / 2
+        
+        self.canvas_dim            = {}
+        self.canvas_dim['width']   = width
+        self.canvas_dim['height']  = height
+        self.canvas_dim['xleft']   = xmin
+        self.canvas_dim['xright']  = xmax
+        self.canvas_dim['xmid']    = xmid
+        self.canvas_dim['ytop']    = ymax
+        self.canvas_dim['ybottom'] = ymin
+        self.canvas_dim['ymid']    = ymid
+        self.canvas_dim['margin']  = margin
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # CORNER POINTS, PAGE DIMENSIONS
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _create_corner_points(self) -> None:
+        """ TODO """
         # Coordinates of the corners
         self.top_left = (
-            self.move_right_by(xmin, delta),
-            self.move_down_by(ymin, delta),
+            self.move_right_by(self.canvas_dim['xleft'], self.canvas_dim['margin']),
+            self.move_down_by( self.canvas_dim['ytop'], self.canvas_dim['margin']),
         )
         self.top_right = (
-            self.move_left_by(xmax, delta),
-            self.move_down_by(ymin, delta),
+            self.move_left_by( self.canvas_dim['xright'], self.canvas_dim['margin']),
+            self.move_down_by( self.canvas_dim['ytop'], self.canvas_dim['margin']),
         )
         self.bottom_right = (
-            self.move_left_by(xmax, delta),
-            self.move_up_by(ymax, delta),
+            self.move_left_by( self.canvas_dim['xright'], self.canvas_dim['margin']),
+            self.move_up_by(   self.canvas_dim['ybottom'], self.canvas_dim['margin']),
         )
         self.bottom_left = (
-            self.move_right_by(xmin, delta),
-            self.move_up_by(ymax, delta),
+            self.move_right_by(self.canvas_dim['xleft'], self.canvas_dim['margin']),
+            self.move_up_by(   self.canvas_dim['ybottom'], self.canvas_dim['margin']),
         )
 
         # Canvas dimensions after taking into account the distance from the edges (delta)
-        self.page_width = self.top_right[0] - self.top_left[0]
+        self.page_width  = self.top_right[0] - self.top_left[0]
         self.page_height = self.top_right[1] - self.bottom_right[1]
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # SECTION OF A PAGE
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def _create_page_sections(self) -> None:
+        """ TODO """
         # Break down the page into 20 units
         h_ = self.page_height / 20
         # Define a space 2 units from top of page (splits upper section from header)
@@ -133,15 +235,11 @@ class generate_pdf:
         # Define a space 11 units from top of page (splits lower section from upper section)
         line_below_upper_section = 11 * h_
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # ANCHOR POINTS
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Create dictionary for anchor points
         self.dict_alph = {}
-
         # Create anchor points at the corners, clockwise starting from top left
         self.show_key_point(
-            "A", x=self.top_left[0], y=self.top_left[1], show=self.show_all_points
+            "A", x=self.top_left[0],  y=self.top_left[1],  show=self.show_all_points
         )  # Top left (A)
         self.show_key_point(
             "B", x=self.top_right[0], y=self.top_right[1], show=self.show_all_points
@@ -181,7 +279,7 @@ class generate_pdf:
             y=self.move_down_by(self.top_left[1], line_below_header),
             show=self.show_all_points,
         )
-
+        
         # Create anchor points between UPPER SECTION and LOWER SECTION
         self.show_key_point(
             "G",
@@ -208,9 +306,6 @@ class generate_pdf:
             show=self.show_all_points,
         )
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # STRUCTURAL LINES
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Draw lines connecting the corners
         if self.show_all_lines:
             # AB (top horizontal)
@@ -220,7 +315,6 @@ class generate_pdf:
                 y=self.top_left[1],
                 color=colors.black,
             )
-
             # BC (right vertical)
             self.draw_vline(
                 x=self.top_right[0],
@@ -228,7 +322,6 @@ class generate_pdf:
                 y2=self.bottom_right[1],
                 color=colors.red,
             )
-
             # CD (bottom horizontal)
             self.draw_hline(
                 x1=self.bottom_left[0],
@@ -236,7 +329,6 @@ class generate_pdf:
                 y=self.bottom_left[1],
                 color=colors.blue,
             )
-
             # DA (left vertical)
             self.draw_vline(
                 x=self.bottom_left[0],
@@ -244,16 +336,14 @@ class generate_pdf:
                 y2=self.bottom_left[1],
                 color=colors.green,
             )
-
             # Split page vertically into two regions
             # V line
             self.draw_vline(
-                x=self.xmid,
+                x=self.canvas_dim['xmid'],
                 y1=self.top_right[1],
                 y2=self.bottom_right[1],
                 color=colors.red,
             )
-
             # Create the boundary between UPPER SECTION and LOWER SECTION, 11 unit from the top
             # H line
             self.draw_hline(
@@ -262,7 +352,6 @@ class generate_pdf:
                 y=self.move_down_by(self.top_left[1], line_below_upper_section),
                 color=colors.grey,
             )
-
             # Create the boundary between HEADER and UPPER SECTION, 2 unit from the top
             # H line
             self.draw_hline(
@@ -272,498 +361,20 @@ class generate_pdf:
                 color=colors.black,
             )
 
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # HEADER INFORMATION
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # Write the HEADER with subject and measurement information
-        y0 = 15
-        dx = 10
-        dy = 15
-        # Title
-        self.write_text(
-            ["Motor Imagery Report"],
-            self.xmid,
-            self.move_down_by(self.dict_alph["I"][1], y0),
-            font_size=17,
-            bold_flags=[True],
-            align="center",
-        )
-        # Upper right corner
-        self.write_text(
-            [f"Generated: {self.formatted_date}"],
-            self.top_right[0],
-            self.move_down_by(self.dict_alph["I"][1], y0),
-            font_size=11,
-            bold_flags=[False],
-            align="right",
-        )
-        self.write_text(
-            [f"Version: {self.version}"],
-            self.top_right[0],
-            self.move_down_by(self.move_down_by(self.dict_alph["I"][1], y0), y0),
-            font_size=10,
-            bold_flags=[False],
-            align="right",
-        )
 
-        # Left section
-        font_size = 11
-        height = self.move_down_by(self.dict_alph["I"][1], 15) - self.move_up_by(
-            self.dict_alph["J"][1], 5
-        )
-        dy = height / 3
-        # Left side
-        self.write_text(
-            ["Subject: ", f"{self.sub_name}"],
-            self.xmid * 2 / 3 - dx,
-            self.move_down_by(self.dict_alph["I"][1], y0 + dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="right",
-        )
-        self.write_text(
-            ["Session: ", f"{self.ses_name}"],
-            self.xmid * 2 / 3 - dx,
-            self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="right",
-        )
-        self.write_text(
-            ["Date of assessment: ", f"{self.date_test}"],
-            self.xmid * 2 / 3 - dx,
-            self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="right",
-        )
-
-        # Center side
-        self.write_text(
-            ["Age at test: ", f"{self.sub_age} "],
-            self.xmid,
-            self.move_down_by(self.dict_alph["I"][1], y0 + dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="center",
-        )
-        self.write_text(
-            ["Condition: ", f"{self.condition} "],
-            self.xmid,
-            self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="center",
-        )
-        self.write_text(
-            ["Montage: ", f"{self.montage_name}"],
-            self.xmid,
-            self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="center",
-        )
-
-        # Right side
-        self.write_text(
-            ["Resolution: ", f"{self.resolution} Hz"],
-            self.xmid * 2 * 2 / 3 + dx,
-            self.move_down_by(self.dict_alph["I"][1], y0 + dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="left",
-        )
-        self.write_text(
-            ["Rerefence: ", f"{self.reference}"],
-            self.xmid * 2 * 2 / 3 + dx,
-            self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="left",
-        )
-        self.write_text(
-            ["Filter: ", f"1-40 Hz"],
-            self.xmid * 2 * 2 / 3 + dx,
-            self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="left",
-        )
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # UPPER SECTION PLOTS
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # Import r2 topoplots to the UPPER SECTION
-        dy = 5
-        height = self.move_down_by(self.dict_alph["E"][1], dy) - self.dict_alph["G"][1]
-        width = self.image_ratio(
-            f"{self.plot_folder}topoR2_{self.resolution}_Hz.png", new_height=height
-        )
-        x_left = self.page_width / 2 - width / 2 + self.top_left[0]
-        x_right = self.page_width / 2 + width / 2 + self.top_left[0]
-        image_path = f"{self.plot_folder}topoR2_{self.resolution}_Hz.svg"
-        self.draw_svg_image(
-            image_path,
-            x=x_left,
-            y=self.move_up_by(self.dict_alph["G"][1], 20),
-            width=None,
-            height=height,
-        )
-
-        # Import p-val for left hand to the UPPER SECTION
-        width = self.image_ratio(
-            f"{plot_folder}pVal_left_{self.resolution}_Hz.png", new_height=height
-        )
-        image_path = f"{plot_folder}pVal_left_1_Hz.svg"
-        self.draw_svg_image(
-            image_path,
-            x=x_left - width,
-            y=self.dict_alph["K"][1],
-            width=width,
-            height=None,
-        )
-
-        # Import p-val for right hand to the UPPER SECTION
-        width = self.image_ratio(
-            f"{plot_folder}pVal_right_{self.resolution}_Hz.png", new_height=height
-        )
-        image_path = f"{plot_folder}pVal_right_{self.resolution}_Hz.svg"
-        self.draw_svg_image(
-            image_path, x=x_right, y=self.dict_alph["K"][1], width=width, height=None
-        )
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # LOWER SECTION PLOTS
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # Import c3 psds to the LOWER SECTION
-        image_path = f"{plot_folder}c3_PSDs_{self.resolution}_Hz.svg"
-        height = self.dict_alph["G"][1] - self.dict_alph["D"][1]
-        self.draw_svg_image(
-            image_path,
-            x=self.move_right_by(self.dict_alph["L"][0], 15),
-            y=self.move_up_by(self.dict_alph["L"][1], 5),
-            width=None,
-            height=height,
-        )
-
-        # Import c4 psds to the LOWER SECTION
-        image_path = f"{plot_folder}c4_PSDs_{self.resolution}_Hz.svg"
-        height = self.dict_alph["G"][1] - self.dict_alph["D"][1]
-        self.draw_svg_image(
-            image_path,
-            x=self.move_right_by(self.dict_alph["D"][0], 15),
-            y=self.move_up_by(self.dict_alph["L"][1], 5),
-            width=None,
-            height=height,
-        )
-
-        # Import brain image
-        width = 85
-        image_path = os.path.join(
-            "/mnt/c/Users/scana/Dropbox/WCornell/develop/motorimagery/",
-            "brain_c3c4.svg",
-        )
-        self.draw_svg_image(
-            image_path,
-            x=self.move_left_by(self.xmid, width * 0.37),
-            y=self.move_up_by(
-                self.dict_alph["L"][1],
-                (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2,
-            ),
-            width=width,
-            height=None,
-        )
-
-        # Line for c3
-        self.draw_vline(
-            x=self.move_left_by(self.xmid, width * 0.37 / 2),
-            y1=self.move_up_by(
-                self.dict_alph["L"][1],
-                (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2 + width * 0.41,
-            ),
-            y2=self.move_up_by(
-                self.move_up_by(
-                    self.dict_alph["L"][1],
-                    (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2
-                    + width * 0.41,
-                ),
-                50,  # lenght of line
-            ),
-            color=colors.red,
-        )
-        self.draw_hline(
-            x1=self.move_left_by(self.xmid, width * 0.37 / 2),
-            x2=self.move_right_by(self.move_left_by(self.xmid, width * 0.37 / 2), 50),
-            y=self.move_up_by(
-                self.move_up_by(
-                    self.dict_alph["L"][1],
-                    (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2
-                    + width * 0.41,
-                ),
-                50,  # lenght of line
-            ),
-            color=colors.red,
-        )
-
-        # Line for c4
-        self.draw_vline(
-            x=self.move_right_by(self.xmid, width * 0.37 / 2),
-            y1=self.move_up_by(
-                self.dict_alph["L"][1],
-                (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2 + width * 0.41,
-            ),
-            y2=self.move_down_by(
-                self.move_up_by(
-                    self.dict_alph["L"][1],
-                    (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2
-                    + width * 0.41,
-                ),
-                50,
-            ),
-            color=colors.blue,
-        )
-        self.draw_hline(
-            x1=self.move_right_by(self.xmid, width * 0.37 / 2),
-            x2=self.move_left_by(self.move_right_by(self.xmid, width * 0.37 / 2), 50),
-            y=self.move_down_by(
-                self.move_up_by(
-                    self.dict_alph["L"][1],
-                    (self.dict_alph["K"][1] - self.dict_alph["L"][1]) / 2
-                    + width * 0.41,
-                ),
-                50,
-            ),
-            color=colors.blue,
-        )
-
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # SAVE CANVAS
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # Save the canvas
-        self.c.save()
-
-    def prompt_for_date(
-        self,
-    ):
-        """Asks the user a date in the format yyyy-mm-dd
-
-        Args:
-                None
-
-        Returns:
-                str: Date in the format yyyy-mm-dd
-        """
-        while True:
-            user_input = input("Enter date of the test [yyyy-mm-dd] (0 if not known): ")
-            try:
-                if user_input == "0":
-                    print("Date not known.")
-                    return "N/A"
-                else:
-                    # Attempt to parse the date string into a datetime object.
-                    parsed_date = datetime.datetime.strptime(user_input, "%Y-%m-%d")
-                    return parsed_date.strftime(
-                        "%Y-%m-%d"
-                    )  # Returns the date in yyyy-mm-dd format
-            except ValueError:
-                # If there's an error in parsing, it means the format is incorrect.
-                print("Invalid date format. Enter date of the test [yyyy-mm-dd]: ")
-
-    def prompt_for_age(
-        self,
-    ):
-        """Asks the user the subject's age
-
-        Args:
-                None
-
-        Returns:
-                int: Age of the subject
-        """
-        while True:
-            user_input = input("Enter the subject's year of birth (0 if not known): ")
-            try:
-                # Attempt to convert the input to an integer.
-                age = int(user_input)
-                # Additional check: ensure age is within a reasonable range
-                if age == 0:
-                    print("Age not known.")
-                    return "N/A"
-                elif age < 1900 or age > 3000:
-                    print(
-                        "Invalid age entered. Please enter the subject's year of birth."
-                    )
-                else:
-                    return (
-                        int(self.date_test.split("-")[0]) - age
-                    )  # Returns the age as an integer
-            except ValueError:
-                # If conversion to integer fails, it means the input was not a valid integer.
-                print("Invalid input. Please enter the subject's age.")
-
-    # Functions to find specific coordinates using anchor points and distances (dx or dy) from them.
-    # Useful for navigating a PDF file, assuming the bottom left corner to be the point (0,0).
-    def move_right_by(self, x, dx):
-        """Move a point to the right by a given distance.
-
-        Args:
-            x (float): The current x-coordinate.
-            dx (float): The distance to move to the right.
-
-        Returns:
-            float: The new x-coordinate after moving right.
-        """
-        return x + dx
-
-    def move_left_by(self, x, dx):
-        """Move a point to the left by a given distance.
-
-        Args:
-            x (float): The current x-coordinate.
-            dx (float): The distance to move to the left.
-
-        Returns:
-            float: The new x-coordinate after moving left.
-        """
-        return x - dx
-
-    def move_up_by(self, y, dy):
-        """Move a point upward by a given distance.
-
-        Args:
-            y (float): The current y-coordinate.
-            dy (float): The distance to move upward.
-
-        Returns:
-            float: The new y-coordinate after moving up.
-        """
-        return y + dy
-
-    def move_down_by(self, y, dy):
-        """Move a point downward by a given distance.
-
-        Args:
-            y (float): The current y-coordinate.
-            dy (float): The distance to move downward.
-
-        Returns:
-            float: The new y-coordinate after moving down.
-        """
-        return y - dy
-
-    def show_key_point(self, name, x, y, show=True):
-        """Generate anchor point with its name at given coordinates on the PDF. The point can be displayed as well.
-
-        Args:
-            name (str): The name of the key point.
-            x (float): x-coordinate of the key point.
-            y (float): y-coordinate of the key point.
-            show (bool): Flag to either show or not show the point visually on the PDF.
-
-        Modifies:
-            dict_alph (dict): Dictionary to store key point names and coordinates.
-        """
-        self.dict_alph[name] = [x, y]
-        if show:
-            self.c.setFont("Helvetica", 16)  # Set the font for text display.
-            self.c.drawString(x, y, name)  # Draw the name at the specified coordinates.
-
-    def draw_hline(self, x1, x2, y, color=colors.black):
-        """Draws a horizontal line between two x-coordinates at a fixed y-coordinate.
-
-        Args:
-            x1 (float): The starting x-coordinate of the line.
-            x2 (float): The ending x-coordinate of the line.
-            y (float): The y-coordinate at which the line is drawn.
-            color: The color of the line.
-
-        Modifies:
-            c (canvas): The PDF canvas.
-        """
-        self.c.setStrokeColor(color)  # Set the line color.
-        self.c.line(x1, y, x2, y)  # Draws a line from (x1, y) to (x2, y).
-
-    def draw_vline(self, x, y1, y2, color=colors.black):
-        """Draws a vertical line between two y-coordinates at a fixed x-coordinate.
-
-        Args:
-            x (float): The x-coordinate at which the line is drawn.
-            y1 (float): The starting y-coordinate of the line.
-            y2 (float): The ending y-coordinate of the line.
-            color: The color of the line.
-
-        Modifies:
-            c (canvas): The PDF canvas.
-        """
-        self.c.setStrokeColor(color)  # Set the line color.
-        self.c.line(x, y1, x, y2)  # Draws a line from (x, y1) to (x, y2).
-
-    def image_ratio(self, image_path, new_width=None, new_height=None):
-        """Calculate new dimensions for an image to maintain aspect ratio.
-
-        Args:
-            image_path (str): Path to the image file.
-            new_width (int, optional): Desired new width of the image.
-            new_height (int, optional): Desired new height of the image.
-
-        Returns:
-            float: The new dimension not provided by the user (either new width or height).
-
-        Raises:
-            ValueError: If neither new_width nor new_height is provided.
-        """
-        img = Image.open(image_path)
-        orig_width, orig_height = img.size
-
-        if new_width:
-            scale_factor = new_width / orig_width
-            new_height = orig_height * scale_factor
-            return new_height
-
-        elif new_height:
-            scale_factor = new_height / orig_height
-            new_width = orig_width * scale_factor
-            return new_width
-
-        else:
-            raise ValueError("Either new_width or new_height must be provided.")
-
-    def draw_image(self, img_path, x_left, y_bottom, width=None, height=None):
-        """Draws an image on a canvas with the specified dimensions. The image must be non-vector (e.g. .png, .jpeg)
-               Doesn't work with .pdf or .svg
-
-        Args:
-            img_path (str): Path to the image file.
-            x_left (float): Left x-coordinate where the image starts, bottom left corner.
-            y_bottom (float): Bottom y-coordinate where the image starts, bottom left corner.
-            width (int, optional): Width to which the image should be resized.
-            height (int, optional): Height to which the image should be resized.
-
-        Modifies:
-            c (canvas): The PDF canvas.
-        """
-        if width:
-            height = self.image_ratio(img_path, new_width=width)
-        elif height:
-            width = self.image_ratio(img_path, new_height=height)
-
-        self.c.drawImage(img_path, x_left, y_bottom, width=width, height=height)
-
-    def write_text(
-        self, text_list, x, y, font_size=12, bold_flags=None, align="center"
-    ):
+    # -------------------------------------------------------------------------
+    # METHODS FOR PLOTTING
+    # -------------------------------------------------------------------------
+    def _write_text(self, text_list, x, y, font_size=12, bold_flags=None, align="center"):
         """Writes a list of texts at a specified position with optional bold and alignment.
 
         Args:
-            text_list (list): List of texts to be displayed.
-            x (float): X-coordinate for alignment, bottom left corner.
-            y (float): Y-coordinate where texts start, bottom left corner.
-            font_size (int): Font size of the text.
-            bold_flags (list, optional): List of boolean values indicating if corresponding text is bold.
-            align (str): Alignment of text; options are 'center', 'left', 'right'.
-
-            Modifies:
-            c (canvas): The PDF canvas.
+            text_list (list): List of texts to be displayed
+            x (float): X-coordinate for alignment, bottom left corner
+            y (float): Y-coordinate where texts start, bottom left corner
+            font_size (int): Font size of the text
+            bold_flags (list, optional): List of boolean values indicating if corresponding text is bold
+            align (str): Alignment of text; options are 'center', 'left', 'right'
         """
         if bold_flags is None:
             bold_flags = [False] * len(text_list)
@@ -791,87 +402,590 @@ class generate_pdf:
             self.c.drawString(current_x, y, text)
             current_x += width
 
-    def get_svg_dimensions(self, svg_file):
-        """Retrieve the dimensions of an SVG file.
+    def _is_svg(self, path: str) -> bool:
+        """Return True if the file looks like an SVG"""
+        return os.path.splitext(path.lower())[1] == ".svg"
 
-        Args:
-            svg_file (str): Path to the SVG file.
-
-        Returns:
-            tuple: A tuple containing the 'width' and 'height' of the SVG as strings.
+    def _get_raster_size(self, path: str) -> Tuple[float, float]:
         """
-        tree = ET.parse(svg_file)
-        root = tree.getroot()
-        width = root.get("width")
-        height = root.get("height")
-
-        return width, height
-
-    def scale(self, drawing, scaling_factor):
-        """Scales a drawing object uniformly along both axes.
-
-        Args:
-            drawing (Drawing): A Drawing object from reportlab.graphics.shapes.
-            scaling_factor (float): The factor by which to scale the drawing.
-
-        Returns:
-            Drawing: The scaled Drawing object.
+        Return (width, height) in *pixels* from PIL
+        Note: ReportLab uses points, but for aspect-ratio math, units cancel out,
+        so pixels are fine as an intrinsic size reference
         """
-        scaling_x = scaling_y = scaling_factor
-        drawing.scale(scaling_x, scaling_y)
-        return drawing
+        with Image.open(path) as img:
+            w, h = img.size
+        return float(w), float(h)
 
-    def add_image(self, image_path, scaling_factor, x, y):
-        """Adds a scaled image to a reportlab canvas at specified coordinates.
-           Works for .svg images
+    def _get_svg_size(self, path: str) -> Tuple[float, float]:
+        """Return (width, height) in ReportLab drawing units (points-ish)"""
+        drawing = svg2rlg(path)
+        return float(drawing.width), float(drawing.height)
 
-        Args:
-            image_path (str): Path to the SVG image file.
-            scaling_factor (float): The factor by which to scale the image.
-            x (float): The x-coordinate where the image will be placed, bottom left corner.
-            y (float): The y-coordinate where the image will be placed, bottom left corner.
-
-            Modifies:
-            c (canvas): The PDF canvas.
+    def _resolve_size_preserve_ratio(
+        self,
+        orig_w: float,
+        orig_h: float,
+        width: Optional[float],
+        height: Optional[float],
+    ) -> Tuple[float, float]:
         """
-        drawing = svg2rlg(image_path)
-        # print(f"Minimum width before scaling: {drawing.minWidth()}")
-        # print(f"Width before scaling: {drawing.width}")
-        # print(f"Height before scaling: {drawing.height}")
-        scaled_drawing = self.scale(drawing, scaling_factor=scaling_factor)
-        renderPDF.draw(scaled_drawing, self.c, x, y)
-
-    def draw_svg_image(self, image_path, x, y, width=None, height=None):
-        """Draw an SVG image on a canvas at a scaled size based on specified width or height.
-
-        Args:
-            image_path (str): Path to the SVG file.
-            x (float): The x-coordinate where the image will be placed, bottom left corner.
-            y (float): The y-coordinate where the image will be placed, bottom left corner.
-            width (float, optional): The desired width for scaling the SVG image.
-            height (float, optional): The desired height for scaling the SVG image.
-
-        Modifies:
-            c (canvas): The PDF canvas.
+        Resolve final (w, h) preserving aspect ratio
+        Rules:
+        - width only  -> compute height
+        - height only -> compute width
+        - both        -> fit inside (width, height) preserving ratio
+        - neither     -> use original
         """
-        svg_dimensions = self.get_svg_dimensions(image_path)
-        svg_width_pt, svg_height_pt = float(svg_dimensions[0].split("pt")[0]), float(
-            svg_dimensions[1].split("pt")[0]
-        )
-        svg_width_px = svg_width_pt * 4 / 3  # Convert points to pixels for width
-        svg_height_px = svg_height_pt * 4 / 3  # Convert points to pixels for height
+        if orig_w <= 0 or orig_h <= 0:
+            raise ValueError("Invalid intrinsic size for image (non-positive width/height).")
 
-        if height:
-            scaling_factor = height / svg_height_px
-        elif width:
-            scaling_factor = width / svg_width_px
+        if width is None and height is None:
+            return orig_w, orig_h
+
+        if width is not None and height is None:
+            scale = width / orig_w
+            return width, orig_h * scale
+
+        if height is not None and width is None:
+            scale = height / orig_h
+            return orig_w * scale, height
+
+        # Both provided: fit within bounding box
+        scale = min(width / orig_w, height / orig_h)
+        return orig_w * scale, orig_h * scale
+
+    def _anchor_to_bottom_left(
+        self,
+        x: float,
+        y: float,
+        w: float,
+        h: float,
+        x_anchor: XAnchor,
+        y_anchor: YAnchor,
+    ) -> Tuple[float, float]:
+        """Convert an anchor point to bottom-left coordinates"""
+        if x_anchor == "left":
+            x_left = x
+        elif x_anchor == "center":
+            x_left = x - w / 2
+        elif x_anchor == "right":
+            x_left = x - w
         else:
-            raise ValueError(
-                "Either width or height must be provided to scale the SVG."
+            raise ValueError(f"Invalid x_anchor: {x_anchor}")
+
+        if y_anchor == "bottom":
+            y_bottom = y
+        elif y_anchor == "center":
+            y_bottom = y - h / 2
+        elif y_anchor == "top":
+            y_bottom = y - h
+        else:
+            raise ValueError(f"Invalid y_anchor: {y_anchor}")
+
+        return x_left, y_bottom
+
+    def draw_figure_at(
+        self,
+        image_path: str,
+        *,
+        x: float,
+        y: float,
+        x_anchor: XAnchor = "left",
+        y_anchor: YAnchor = "bottom",
+        width: Optional[float] = None,
+        height: Optional[float] = None,
+    ) -> Dict[str, float]:
+        """
+        Draw a figure whose position is defined by an anchor point (x, y)
+
+        Examples:
+        - x_anchor='center' means the *center* of the figure touches x
+        - y_anchor='top'    means the *top edge* of the figure touches y
+
+        If only one of width/height is provided, the other is inferred by ratio
+        If both are provided, the figure is fit inside that box preserving ratio
+
+        Returns a dict with final placement info (useful for debugging/layout)
+        """
+        if self._is_svg(image_path):
+            orig_w, orig_h = self._get_svg_size(image_path)
+        else:
+            orig_w, orig_h = self._get_raster_size(image_path)
+
+        final_w, final_h = self._resolve_size_preserve_ratio(
+            orig_w=orig_w,
+            orig_h=orig_h,
+            width=width,
+            height=height,
+        )
+
+        x_left, y_bottom = self._anchor_to_bottom_left(
+            x=x, y=y, w=final_w, h=final_h, x_anchor=x_anchor, y_anchor=y_anchor
+        )
+
+        # Actually draw
+        if self._is_svg(image_path):
+            drawing = svg2rlg(image_path)
+            scale = final_w / float(drawing.width)  # same as final_h/drawing.height (ratio preserved)
+            drawing.scale(scale, scale)
+            renderPDF.draw(drawing, self.c, x_left, y_bottom)
+        else:
+            self.c.drawImage(image_path, x_left, y_bottom, width=final_w, height=final_h)
+
+        return {
+            "xleft": x_left,
+            "y_bottom": y_bottom,
+            "width": final_w,
+            "height": final_h,
+        }
+
+
+    # -------------------------------------------------------------------------
+    # METHODS FOR BUILDING PDF CONTENT
+    # -------------------------------------------------------------------------
+    # Page 1
+    def _generate_header(self) -> None:
+        """ TODO """
+        # Write the HEADER with subject and measurement information
+        y0 = 15
+        dx = 10
+        dy = 15
+        # Title
+        self._write_text(
+            ["Command Following Report"],
+            self.canvas_dim["xmid"],
+            self.move_down_by(self.dict_alph["I"][1], y0),
+            font_size=17,
+            bold_flags=[True],
+            align="center",
+        )
+        # Upper right corner
+        self._write_text(
+            [f"Generated: {self.formatted_date}"],
+            self.top_right[0],
+            self.move_down_by(self.dict_alph["I"][1], y0),
+            font_size=11,
+            bold_flags=[False],
+            align="right",
+        )
+        self._write_text(
+            [f"Version: {self.version}"],
+            self.top_right[0],
+            self.move_down_by(self.move_down_by(self.dict_alph["I"][1], y0), y0),
+            font_size=10,
+            bold_flags=[False],
+            align="right",
+        )
+
+        # Left section
+        font_size = 11
+        height = self.move_down_by(self.dict_alph["I"][1], 15) - self.move_up_by(
+            self.dict_alph["J"][1], 5
+        )
+        dy = height / 3
+        # Left column
+        self._write_text(
+            ["Subject: ", f"{self.sub_name}"],
+            self.canvas_dim['xmid'] * 2 / 3 - dx,
+            self.move_down_by(self.dict_alph["I"][1], y0 + dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="right",
+        )
+        self._write_text(
+            ["Session: ", f"{self.ses_name}"],
+            self.canvas_dim['xmid'] * 2 / 3 - dx,
+            self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="right",
+        )
+        self._write_text(
+            ["Date of assessment: ", f"{self.date_test}"],
+            self.canvas_dim['xmid'] * 2 / 3 - dx,
+            self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="right",
+        )
+
+        # Center column
+        self._write_text(
+            ["Age at test: ", f"{self.age_at_test} "],
+            self.canvas_dim['xmid'],
+            self.move_down_by(self.dict_alph["I"][1], y0 + dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="center",
+        )
+        self._write_text(
+            ["Condition: ", f"{self.condition} "],
+            self.canvas_dim['xmid'],
+            self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="center",
+        )
+        self._write_text(
+            ["Montage: ", f"{self.montage_name}"],
+            self.canvas_dim['xmid'],
+            self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="center",
+        )
+
+        # Right column
+        self._write_text(
+            ["Resolution: ", f"{self.resolution} Hz"],
+            self.canvas_dim['xmid'] * 2 * 2 / 3 + dx,
+            self.move_down_by(self.dict_alph["I"][1], y0 + dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="left",
+        )
+        self._write_text(
+            ["Spatial filter: ", f"{self.spatial_filter}"],
+            self.canvas_dim['xmid'] * 2 * 2 / 3 + dx,
+            self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="left",
+        )
+        self._write_text(
+            ["Filter: ", f"1-40 Hz"],
+            self.canvas_dim['xmid'] * 2 * 2 / 3 + dx,
+            self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
+            font_size=font_size,
+            bold_flags=[False, True],
+            align="left",
+        )
+
+    def _plot_timeline(self) -> None:
+        """ TODO """
+        dy         = 5
+        width      = 500
+        image_path = os.path.join(self.plot_folder, "paradigm_timeline.svg")
+        if Path(image_path).exists():
+            self.draw_figure_at(
+                image_path,
+                x=self.canvas_dim["xmid"],
+                y=self.move_down_by(self.dict_alph["J"][1], dy),
+                x_anchor="center",
+                y_anchor="top",
+                width=width,
             )
 
-        # Adjust scaling factor slightly larger than calculated
-        scaling_factor_adjusted = scaling_factor
+    def _plot_topoplots(self) -> None:
+        """ TODO """
+        dy     = 130
+        height = 300
+        
+        # Import r2 topoplots 
+        topoplot = os.path.join(self.plot_folder, "topoplot.svg")
+        if Path(topoplot).exists():
+            self.draw_figure_at(
+                topoplot,
+                x=self.canvas_dim["xmid"],
+                y=self.move_down_by(self.dict_alph["J"][1], dy),
+                x_anchor="center",
+                y_anchor="top",
+                height=height,
+            )
 
-        # Call the function to add the image to the canvas
-        self.add_image(image_path, scaling_factor=scaling_factor_adjusted, x=x, y=y)
+        # Left p-value
+        p_left = os.path.join(self.plot_folder, "pvalue_left.svg")
+        if Path(p_left).exists():
+            self.draw_figure_at(
+                p_left,
+                x=self.move_right_by(self.canvas_dim["xleft"], 55),
+                y=self.move_down_by(self.dict_alph["J"][1], dy + 30),
+                x_anchor="left",
+                y_anchor="top",
+                height=int(height * 0.95),
+            )
+
+        # Right p-value
+        p_right = os.path.join(self.plot_folder, "pvalue_right.svg")
+        if Path(p_right).exists():
+            self.draw_figure_at(
+                p_right,
+                x=self.move_left_by(self.canvas_dim["xright"], 55),
+                y=self.move_down_by(self.dict_alph["J"][1], dy + 30),
+                x_anchor="right",
+                y_anchor="top",
+                height=int(height * 0.93),
+            )
+
+    def _plot_band_effects(self) -> None:
+        """ TODO """
+        dy         = 5
+        width      = 450
+        image_path = os.path.join(self.plot_folder, "band_effect.svg")
+        if Path(image_path).exists():
+            self.draw_figure_at(
+                image_path,
+                x=self.canvas_dim["xmid"],
+                y=self.move_up_by(self.dict_alph["L"][1], dy),
+                x_anchor="center",
+                y_anchor="bottom",
+                width=width,
+            )
+
+
+    # Page 2 - psds
+    def _plot_brain(self) -> None:
+        """ TODO """
+        
+        y_mid = abs(self.dict_alph['J'][1] - self.dict_alph['L'][1]) / 2
+        width      = 85
+        image_path = os.path.join(self.helper_folder, "brain_c3c4p3p4.svg")
+        if Path(image_path).exists():
+            self.draw_figure_at(
+                image_path,
+                x=self.canvas_dim["xmid"],
+                y=self.move_up_by(y_mid, 10),
+                x_anchor="center",
+                y_anchor="center",
+                width=width,
+            )
+        
+        # Arrow to top right
+        coord = self.draw_vline(
+            x     = self.move_right_by(self.canvas_dim['xmid'], 16),
+            y1    = self.move_up_by(y_mid, 34),
+            y2    = self.move_up_by(y_mid, 68),
+            color = colors.blue,
+        )
+        self.draw_dline(
+            x1    = coord['x'],
+            x2    = self.move_left_by(coord['x'], 90),
+            y1    = coord['y2'],
+            y2    = self.move_up_by(coord['y2'], 70),
+            color = colors.blue,
+            return_coord=False,
+        )
+        # Arrow to top left
+        coord = self.draw_vline(
+            x     = self.move_left_by(self.canvas_dim['xmid'], 13),
+            y1    = self.move_up_by(y_mid, 34),
+            y2    = self.move_up_by(y_mid, 68),
+            color = colors.red,
+        )
+        self.draw_dline(
+            x1    = coord['x'],
+            x2    = self.move_right_by(coord['x'], 90),
+            y1    = coord['y2'],
+            y2    = self.move_up_by(coord['y2'], 70),
+            color = colors.red,
+            return_coord=False,
+        )
+        
+        # Arrow to mid right
+        coord = self.draw_dline(
+            x1    = self.move_right_by(self.canvas_dim['xmid'], 20),
+            x2    = self.move_right_by(self.canvas_dim['xmid'], 12.5),
+            y1    = self.move_up_by(y_mid, 7.5),
+            y2    = y_mid,
+            color = colors.blue,
+        )
+        self.draw_hline(
+            x1    = coord['x2'],
+            x2    = self.move_left_by(coord['x2'], 100),
+            y     = coord['y2'],
+            color = colors.blue,
+            return_coord=False,
+        )
+        # Arrow to mid left
+        coord = self.draw_dline(
+            x1    = self.move_left_by(self.canvas_dim['xmid'], 17),
+            x2    = self.move_left_by(self.canvas_dim['xmid'], 9.5),
+            y1    = self.move_up_by(y_mid, 12),
+            y2    = self.move_up_by(y_mid, 19.5),
+            color = colors.red,
+        )
+        self.draw_hline(
+            x1    = coord['x2'],
+            x2    = self.move_right_by(coord['x2'], 100),
+            y     = coord['y2'],
+            color = colors.red,
+            return_coord=False,
+        )
+        
+        # Arrow to bottom right
+        coord = self.draw_vline(
+            x     = self.move_right_by(self.canvas_dim['xmid'], 16),
+            y1    = self.move_down_by(y_mid, 11),
+            y2    = self.move_down_by(y_mid, 45),
+            color = colors.blue,
+        )
+        self.draw_dline(
+            x1    = coord['x'],
+            x2    = self.move_left_by(coord['x'], 90),
+            y1    = coord['y2'],
+            y2    = self.move_down_by(coord['y2'], 70),
+            color = colors.blue,
+            return_coord=False,
+        )
+        # Arrow to bottom left
+        coord = self.draw_vline(
+            x     = self.move_left_by(self.canvas_dim['xmid'], 13),
+            y1    = self.move_down_by(y_mid, 11),
+            y2    = self.move_down_by(y_mid, 45),
+            color = colors.red,
+        )
+        self.draw_dline(
+            x1    = coord['x'],
+            x2    = self.move_right_by(coord['x'], 90),
+            y1    = coord['y2'],
+            y2    = self.move_down_by(coord['y2'], 70),
+            color = colors.red,
+            return_coord=False,
+        )
+
+    def _plot_psds(self) -> None:
+        """ TODO """  
+        
+        y_mid = abs(self.dict_alph['J'][1] - self.dict_alph['L'][1]) / 2
+        width = 200
+        
+        # Right side
+        image_path = os.path.join(self.plot_folder, "psd_fc3.svg")
+        if Path(image_path).exists():
+            self.draw_figure_at(
+                image_path,
+                x=self.move_right_by(self.canvas_dim["xmid"], 30),
+                y=self.move_down_by(self.dict_alph['J'][1], 5),
+                x_anchor="left",
+                y_anchor="top",
+                width=int(width * 0.85),
+            )
+        
+        image_path = os.path.join(self.plot_folder, "psd_c3.svg")
+        if Path(image_path).exists():
+            self.draw_figure_at(
+                image_path,
+                x=self.move_left_by(self.canvas_dim["xright"], 20),
+                y=self.move_up_by(y_mid, 10),
+                x_anchor="right",
+                y_anchor="center",
+                width=width,
+            )
+        
+        image_path = os.path.join(self.plot_folder, "psd_p3.svg")
+        if Path(image_path).exists():
+            self.draw_figure_at(
+                image_path,
+                x=self.move_right_by(self.canvas_dim["xmid"], 30),
+                y=self.move_up_by(self.canvas_dim['ybottom'], 5),
+                x_anchor="left",
+                y_anchor="bottom",
+                width=int(width * 0.85),
+            )
+        else:
+            image_path = os.path.join(self.plot_folder, "psd_cp3.svg")
+            if Path(image_path).exists():
+                self.draw_figure_at(
+                    image_path,
+                    x=self.move_left_by(self.canvas_dim["xmid"], 30),
+                    y=self.move_up_by(self.canvas_dim['ybottom'], 5),
+                    x_anchor="right",
+                    y_anchor="bottom",
+                    width=int(width * 0.85),
+                )
+        
+        # Left side
+        image_path = os.path.join(self.plot_folder, "psd_fc4.svg")
+        if Path(image_path).exists():
+            self.draw_figure_at(
+                image_path,
+                x=self.move_left_by(self.canvas_dim["xmid"], 30),
+                y=self.move_down_by(self.dict_alph['J'][1], 5),
+                x_anchor="right",
+                y_anchor="top",
+                width=int(width * 0.85),
+            )
+        
+        image_path = os.path.join(self.plot_folder, "psd_c4.svg")
+        if Path(image_path).exists():
+            self.draw_figure_at(
+                image_path,
+                x=self.move_right_by(self.canvas_dim["xleft"], 20),
+                y=self.move_up_by(y_mid, 10),
+                x_anchor="left",
+                y_anchor="center",
+                width=width,
+            )
+        
+        image_path = os.path.join(self.plot_folder, "psd_p4.svg")
+        if Path(image_path).exists():
+            self.draw_figure_at(
+                image_path,
+                x=self.move_left_by(self.canvas_dim["xmid"], 30),
+                y=self.move_up_by(self.canvas_dim['ybottom'], 5),
+                x_anchor="right",
+                y_anchor="bottom",
+                width=int(width * 0.85),
+            )
+        else:
+            image_path = os.path.join(self.plot_folder, "psd_cp4.svg")
+            if Path(image_path).exists():
+                self.draw_figure_at(
+                    image_path,
+                    x=self.move_left_by(self.canvas_dim["xmid"], 30),
+                    y=self.move_up_by(self.canvas_dim['ybottom'], 5),
+                    x_anchor="right",
+                    y_anchor="bottom",
+                    width=int(width * 0.85),
+                )
+            
+        
+    # Page 3 - stats
+    def _plot_stat_dist(self) -> None:
+        """ TODO """
+        
+        dy     = 5
+        height = 200
+        
+        # Import left vs rest
+        stat_left = os.path.join(self.plot_folder, "stat_distribution_left.svg")
+        if Path(stat_left).exists():
+            self.draw_figure_at(
+                stat_left,
+                x=self.canvas_dim["xmid"],
+                y=self.move_down_by(self.dict_alph["J"][1], dy),
+                x_anchor="center",
+                y_anchor="top",
+                height=height,
+            )
+        
+        # Import right vs rest
+        stat_right = os.path.join(self.plot_folder, "stat_distribution_right.svg")
+        if Path(stat_right).exists():
+            self.draw_figure_at(
+                stat_right,
+                x=self.canvas_dim["xmid"],
+                y=self.move_down_by(self.dict_alph["J"][1], height + dy * 3),
+                x_anchor="center",
+                y_anchor="top",
+                height=height,
+            )
+    
+    def _plot_bridged_candidates(self) -> None:
+        """ TODO """
+        
+        dy     = 5
+        height = 250
+        
+        bridged = os.path.join(self.plot_folder, "bridged_candidates.svg")
+        if Path(bridged).exists():
+            self.draw_figure_at(
+                bridged,
+                x=self.canvas_dim["xmid"],
+                y=self.move_up_by(self.dict_alph["L"][1], dy),
+                x_anchor="center",
+                y_anchor="bottom",
+                height=height,
+            )
+        
+
