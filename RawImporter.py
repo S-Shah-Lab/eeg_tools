@@ -7,7 +7,7 @@ Generates a mne.io.Raw object with a montage and, if specified, stimulus channel
 
 
 import os
-from typing import Optional, List, Tuple
+from typing import Any, Optional, List, Dict, Tuple
 
 import mne
 import numpy as np
@@ -17,9 +17,7 @@ import helper.eeg_dict as eeg_dict
 
 
 class EEGRawImporter:
-    """
-    TODO description
-    """
+    """Import EEG recordings from BCI2000 .dat files into MNE Raw objects"""
 
     def __init__(
         self,
@@ -28,9 +26,7 @@ class EEGRawImporter:
         keep_stim   : bool = False,
         verbose     : bool = False,
     ) -> None:
-        """
-        TODO description
-        """
+        """Initialize the importer and load the input file into instance attributes"""
         self.path_to_file = path_to_file   # Path to input file
         self.helper_dir   = helper_dir     # Path to folder with helpers
         self.keep_stim    = keep_stim      # Allows the mne.io.Raw object to be created with or without stim channels
@@ -41,10 +37,8 @@ class EEGRawImporter:
 
 
 
-    def _read_bci2000_stream(self) -> None:
-        """
-        TODO description
-        """
+    def _read_bci2000_stream(self) -> Dict[str, Any]:
+        """Decode the BCI2000 stream and return signal, states, sampling rate, and metadata"""
         # Read BCI2000 stream
         b              = bcistream(self.path_to_file)
         signal, states = b.decode()
@@ -65,8 +59,8 @@ class EEGRawImporter:
             "date_test"  : date_test,
         }
         
-    def _resolve_path(self, fname: str) -> str:
-        """Hunt for a file, which should be in the helper folder"""
+    def _resolve_path(self, fname: str) -> Dict[str, Any]:
+        """Resolve a helper-file path relative to helper_dir or the current working directory"""
         try:
             path_dummy = os.path.join(self.helper_dir, fname)
             if os.path.isfile(path_dummy):
@@ -81,10 +75,8 @@ class EEGRawImporter:
                 print(f"Couldn't find the file at './'")
                 raise RuntimeError("File couldn't be located")
                 
-    def _resolve_montage(self) -> mne.channels.DigMontage:
-        """
-        TODO description
-        """
+    def _resolve_montage(self) -> Dict[str, Any]:
+        """Infer montage type and associated location file from the channel count and names"""
         n_channels = self.stream['n_channels']
         ch_names   = self.stream['ch_names'  ]
         
@@ -185,9 +177,7 @@ class EEGRawImporter:
         return raw
         
     def _add_stim_to_raw(self) -> None:
-        """
-        TODO description
-        """
+        """Append BCI2000 state vectors as MNE stim channels onto self.raw"""
         fs_stim   = self.raw.info["sfreq"]
         states    = self.stream["states"]
         info_stim = mne.create_info(
@@ -199,9 +189,7 @@ class EEGRawImporter:
         self.raw.add_channels([stim])
         
     def _import_dat(self) -> None:
-        """
-        Import a BCI2000 .dat file and build an mne.io.Raw object with montage
-        """
+        """Import a BCI2000 .dat file and populate self.raw with montage and optional stim channels"""
         if self.verbose: print(f"[EEGRawImporter] Importing .dat file: {self.path_to_file}")
 
         stream       = self._read_bci2000_stream()
@@ -232,9 +220,7 @@ class EEGRawImporter:
             self._add_stim_to_raw()
          
     def _import_file(self) -> None:
-        """
-        Creates `self.raw` based on an arsenal of different methods handling different file types
-        """
+        """Dispatch import based on file extension and populate self.raw"""
         # Allowed file types
         allowed_file_type = [".dat"]
         
