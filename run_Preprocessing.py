@@ -18,44 +18,45 @@ raw          = imp.raw
 ch_set       = imp.ch_set
 montage_type = imp.montage["montage_type"]
 
-config = EEGPreprocessorConfig(
-    # Notch
-    run_notch    = True,
-    notch_freqs  = 60,
-    notch_kwargs = {},
+config = EEGPreprocessorConfig([
+    # Execution order is the order listed here
+
+    ("notch", {
+        "freqs": 60,
+        "kwargs": {},
+    }),
+
+    ("bandpass", {
+        "l_freq": 1,
+        "h_freq": 100,
+        "kwargs": {},
+    }),
+
+    ("prep", {
+        "random_state": 83092,
+        "correlation": True,
+        "deviation"  : True,
+        "hf_noise"   : True,
+        "nan_flat"   : True,
+        "ransac"     : True,
+    }),
+
+    ("annotation", {
+        "plot": True,
+    }),
     
-    # Band-pass
-    run_bandpass    = True,
-    l_freq          = 1,
-    h_freq          = 40,
-    bandpass_kwargs = {},
+    ("interpolation", {
+        "reset_bads_after_interp": True,
+    }),
 
-    # PREP
-    run_prep         = True,
-    prep_correlation = True,
-    prep_deviation   = True,
-    prep_hf_noise    = True,
-    prep_nan_flat    = True,
-    prep_ransac      = True,
+    ("rereference", {
+        "channels": "tp9 tp10",
+    }),
 
-    # Manual annotation
-    run_annotation        = True,
-    plot                  = True,
-
-    # Interpolation
-    run_interpolation       = True,
-    reset_bads_after_interp = True,
-
-    # Re-reference
-    run_rereference = True,
-    reref_channels  = "tp9 tp10",
-
-    # Spatial filter
-    run_spatialfilter   = True,
-    spatial_exclude     = None,
-
-    random_state = 83092,
-)
+    ("spatialfilter", {
+        "exclude": None,
+    }),
+])
 
 preproc = EEGPreprocessor(raw, ch_set, config=config, copy=True, montage_type=montage_type, verbose=False)
 preproc.run()
