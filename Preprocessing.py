@@ -20,8 +20,9 @@ This class assumes:
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass
+from collections import OrderedDict
+from typing import Any, Dict, List, Optional, Tuple, Union, Mapping, Iterable, Iterator, Literal, Callable
 
 import numpy as np
 import mne
@@ -33,10 +34,38 @@ from BCI2000Tools.Electrodes import ChannelSet
 import helper.eeg_dict as eeg_dict
 
 
-@dataclass
-class EEGPreprocessorConfig:
-    """Configuration container for enabling preprocessing steps and their parameters"""
+StepName = Literal[
+    "rereference",
+    "spatialfilter",
+    "notch",
+    "bandpass",
+    "prep",
+    "interpolation",
+    "annotation",
+]
 
+@dataclass
+class EEGPreprocessorConfig(OrderedDict[StepName, Dict[str, Any]]):
+    """Ordered mapping of preprocessing steps to parameter dictionaries"""
+    
+    def __init__(
+        self,
+        steps: Optional[Iterable[Tuple[StepName, Mapping[str, Any]]]] = None,
+    ) -> None:
+        super().__init__()
+        if steps is not None:
+            for name, params in steps:
+                self.add_step(name, params)
+
+    def add_step(self, name: StepName, params: Mapping[str, Any]) -> None:
+        """Add a preprocessing step and preserve insertion order for execution."""
+        self[name] = dict(params)
+
+    def iter_steps(self) -> Iterator[Tuple[StepName, Dict[str, Any]]]:
+        """Yield steps in execution order as (name, params) pairs."""
+        yield from self.items()
+
+    """
     # Notch
     run_notch   : bool                                = False
     notch_freqs : Optional[Union[float, List[float]]] = None
@@ -73,7 +102,8 @@ class EEGPreprocessorConfig:
     plot                 : bool = True
 
     random_state: int = 83092
-
+    """
+    
 class EEGPreprocessor:
     """
     High-level preprocessing wrapper for an MNE Raw object
@@ -86,22 +116,21 @@ class EEGPreprocessor:
         5) Re-reference                  (ChannelSet.RerefMatrix) [optional]
         6) patial filter                 (ChannelSet.SLAP)        [optional]
         7) Manual BAD segment annotation (Raw.plot)               [optional]
-        
-    Provides a configurable sequence of filters, channel cleaning, and annotation-based rejection
+
+    Provides a configurable sequence of filters, channel cleaning, and annotation-based rejection.
     """
 
     def __init__(
         self,
         raw    : BaseRaw,
         ch_set : ChannelSet,
-        config : Optional[EEGPreprocessorConfig] = None,
+        config : Optional[EEGPreprocessorConfig | Mapping[StepName, Mapping[str, Any]]] = None,
         copy   : bool = True,
         montage_type: Optional[str] = None,
-        conv_dict: Optional[dict] = None,
+        conv_dict: Optional[Mapping[str, str]] = None,
         verbose: bool = False,
     ) -> None:
-        """Initialize the preprocessor with an MNE Raw object, channel metadata, and step configuration"""
-        
+        """Initialize the preprocessor with an MNE Raw object, montage info, and a preprocessing configuration"""
         if not isinstance(raw, BaseRaw):
             raise TypeError("`raw` must be an instance of mne.io.BaseRaw.")
 
@@ -114,10 +143,27 @@ class EEGPreprocessor:
         self._montage_type = montage_type
         self._conv_dict = conv_dict or eeg_dict.stand1020_to_egi
 
-        self.config : EEGPreprocessorConfig = config or EEGPreprocessorConfig()
-        self.history: Dict[str, Any]        = {}
+        if config is None:
+            self.config: EEGPreprocessorConfig = EEGPreprocessorConfig()
+        elif isinstance(config, EEGPreprocessorConfig):
+            self.config = config
+        else:
+            # Accept any mapping, preserving insertion order (dicts are ordered in modern Python).
+            self.config = EEGPreprocessorConfig(list(config.items()))
+        self.history: Dict[str, Any] = {}
         
         self.verbose = verbose
+
+        self._STEP_DISPATCH: Dict[StepName, Callable[[Mapping[str, Any]], None]] = {
+            "rereference"  : self._apply_rereference,
+            "spatialfilter": self._apply_spatialfilter,
+            "notch"        : self._apply_notch_filter,
+            "bandpass"     : self._apply_bandpass_filter,
+            "prep"         : self._apply_prep,
+            "interpolation": self._apply_interpolation_bad_channels,
+            "annotation"   : self._apply_annotation,
+        }
+
         
         # Cache the original montage so to rebuild coordinates
         # after channel remapping (rereference, spatial filters, etc.)
@@ -147,33 +193,24 @@ class EEGPreprocessor:
 
     # Public API --------------------------------------------------------------
     def run(self) -> Tuple[BaseRaw, Dict[str, Any]]:
-        """Run the configured preprocessing pipeline and return the processed Raw plus a step-by-step history dict"""
-        
-        if self.config.run_notch:
-            self._apply_notch_filter()
-
-        if self.config.run_bandpass:
-            self._apply_bandpass_filter()
-            
-        if self.config.run_prep:
-            self._apply_prep()
-            
-        if self.config.run_annotation:
-            self._apply_annotation(self.config.plot)
-            
-        if self.config.run_interpolation:
-            self._apply_interpolation_bad_channels()
-            
-        if self.config.run_rereference:
-            self._apply_rereference()
-
-        if self.config.run_spatialfilter:
-            self._apply_spatialfilter()
+        """Run preprocessing steps in the order specified by the configuration"""
+        for step_name, params in self.config.iter_steps():
+            if step_name not in self._STEP_DISPATCH:
+                raise KeyError(f"Unknown preprocessing step: {step_name!r}.")
+            # Allow disabling a step explicitly by setting it to None/False.
+            if params is None or params is False:
+                continue
+            if not isinstance(params, Mapping):
+                raise TypeError(
+                    f"Parameters for step {step_name!r} must be a mapping, got {type(params)}."
+                )
+            self._STEP_DISPATCH[step_name](params)
+        return self.raw, self.history
 
     # Helpers -----------------------------------------------------------------
     
     def _infer_montage_type(self, n_ch: int) -> Optional[str]:
-        """Infer the montage type identifier from the number of EEG channels in the recording"""
+        """Infer the montage type string from the number of EEG channels"""
         if n_ch in (21, 24):
             return "DSI_24"
         if n_ch == 32:
@@ -188,7 +225,10 @@ class EEGPreprocessor:
         self,
         ch_names: List[str],
     ) -> Optional[mne.channels.DigMontage]:
-        """Build a DigMontage with standard electrode locations matching the montage conventions"""
+        """
+        Recreate montage selection logic used in EEGRawImporter._make_raw_with_montage
+        Returns a DigMontage that matches the provided channel names
+        """
         montage_type = self._montage_type or self._infer_montage_type(len(ch_names))
         if montage_type is None:
             return None
@@ -255,84 +295,95 @@ class EEGPreprocessor:
         )
         self.raw.set_montage(new_montage)
 
-    def _apply_notch_filter(self) -> None:
+    def _apply_notch_filter(self, params: Mapping[str, Any]) -> None:
         """Apply notch filtering to EEG channels using Raw.notch_filter"""
-        cfg = self.config
+        notch_freqs = params.get('freqs')
+        notch_kwargs: Dict[str, Any] = dict(params.get('kwargs', {}))
 
-        if cfg.notch_freqs is None:
+
+        if notch_freqs is None:
             raise ValueError("[Notch filter] Provide at least one frequency value")
 
         nyq_fs = self.raw.info["sfreq"] / 2.0
 
         # If a scalar is passed (e.g. 50 or 60), create harmonics up to Nyquist
-        if isinstance(cfg.notch_freqs, (int, float)):
-            base = float(cfg.notch_freqs)
+        if isinstance(notch_freqs, (int, float)):
+            base = float(notch_freqs)
             freqs = np.arange(base, nyq_fs, base)
         else:
             # If they passed a custom list, just use it as-is
-            freqs = np.array(cfg.notch_freqs, dtype=float)
+            freqs = np.array(notch_freqs, dtype=float)
 
         self.raw.notch_filter(
             freqs=freqs,
             picks=self._eeg_picks,
-            **cfg.notch_kwargs,
+            **notch_kwargs,
             verbose=self.verbose,
         )
         self.history["notch_filter"] = {
             "freqs" : freqs,
-            "kwargs": cfg.notch_kwargs.copy(),
+            "kwargs": notch_kwargs.copy(),
         }
         
         print(f"[EEGPreprocessor] Notch filter at {freqs}")
 
-    def _apply_bandpass_filter(self) -> None:
-        """Apply band-pass (or high/low-pass) filtering to EEG channels using Raw.filter"""
-        cfg = self.config
+    def _apply_bandpass_filter(self, params: Mapping[str, Any]) -> None:
+        """Apply band-pass (or high-/low-pass) to EEG channels with Raw.filter"""
+        l_freq = params.get('l_freq')
+        h_freq = params.get('h_freq')
+        bandpass_kwargs: Dict[str, Any] = dict(params.get('kwargs', {}))
+
         
-        if cfg.l_freq is None and cfg.h_freq is None:
+        if l_freq is None and h_freq is None:
             raise ValueError("[Bandpass filter] Provide at least one frequency value")
         
         self.raw.filter(
-            l_freq=cfg.l_freq,
-            h_freq=cfg.h_freq,
+            l_freq=l_freq,
+            h_freq=h_freq,
             picks=self._eeg_picks,
-            **cfg.bandpass_kwargs,
+            **bandpass_kwargs,
             verbose=self.verbose,
         )
 
         self.history["bandpass_filter"] = {
-            "l_freq"       : cfg.l_freq,
-            "h_freq"       : cfg.h_freq,
-            "kwargs"       : cfg.bandpass_kwargs.copy(),
+            "l_freq"       : l_freq,
+            "h_freq"       : h_freq,
+            "kwargs"       : bandpass_kwargs.copy(),
             "info_highpass": self.raw.info.get("highpass", None),
             "info_lowpass" : self.raw.info.get("lowpass" , None),
         }
         
-        print(f"[EEGPreprocessor] Bandpass filter at [{cfg.l_freq}-{cfg.h_freq}] Hz")
+        print(f"[EEGPreprocessor] Bandpass filter at [{l_freq}-{h_freq}] Hz")
         
-    def _apply_prep(self) -> None:
+    def _apply_prep(self, params: Mapping[str, Any]) -> None:
         """
-        Detect noisy EEG channels with PREP (pyprep.NoisyChannels) and update raw.info['bads']
+        Apply PREP-like bad-channel detection using pyprep.NoisyChannels
         More details about methods and thresholds can be found here:
         https://pyprep.readthedocs.io/en/latest/generated/pyprep.NoisyChannels.html
         """
-        cfg = self.config
+
+        random_state     = int( params.get('random_state', 83092))
+        prep_correlation = bool(params.get('correlation',  True))
+        prep_deviation   = bool(params.get('deviation',    True))
+        prep_hf_noise    = bool(params.get('hf_noise',     True))
+        prep_nan_flat    = bool(params.get('nan_flat',     True))
+        prep_ransac      = bool(params.get('ransac',       True))
 
         if not any(
             [
-                cfg.prep_correlation,
-                cfg.prep_deviation,
-                cfg.prep_hf_noise,
-                cfg.prep_nan_flat,
-                cfg.prep_ransac,
+                prep_correlation,
+                prep_deviation,
+                prep_hf_noise,
+                prep_nan_flat,
+                prep_ransac,
             ]
         ):
             raise ValueError("[PREP] Provide at least one method")
 
         # First PREP pass (non-RANSAC)
-        nc = NoisyChannels(self.raw, do_detrend=False, random_state=cfg.random_state)
+        nc = NoisyChannels(self.raw, do_detrend=False, random_state=random_state)
 
-        if cfg.prep_correlation:
+        if prep_correlation:
             # Identifies bad channels by correlation
             # Correlations of channels split into 1 s windows
             nc.find_bad_by_correlation(
@@ -341,17 +392,17 @@ class EEGPreprocessor:
                 frac_bad=0.01,
             )
 
-        if cfg.prep_deviation:
+        if prep_deviation:
             # Identifies bad channels by deviation
             # Z-scoring method to find high deviations above threshold
             nc.find_bad_by_deviation(deviation_threshold=5.0)
 
-        if cfg.prep_hf_noise:
+        if prep_hf_noise:
             # Identifies bad channels by high-frequency noise
             # Ratio of amplitudes between >50Hz and overall above threshold
             nc.find_bad_by_hfnoise(HF_zscore_threshold=5.0)
 
-        if cfg.prep_nan_flat:
+        if prep_nan_flat:
             # Identifies bad channels by NaN or flat signals
             # Standard deviation or its median absolute deviation from the median (MAD) are below threshold
             nc.find_bad_by_nan_flat()
@@ -359,10 +410,10 @@ class EEGPreprocessor:
         bad_dict = nc.get_bads(as_dict=True)
         bad_names: List[str] = []
 
-        if cfg.prep_correlation: bad_names += bad_dict["bad_by_correlation"]
-        if cfg.prep_deviation:   bad_names += bad_dict["bad_by_deviation"]
-        if cfg.prep_hf_noise:    bad_names += bad_dict["bad_by_hf_noise"]
-        if cfg.prep_nan_flat:    bad_names += bad_dict["bad_by_nan"] + bad_dict["bad_by_flat"]
+        if prep_correlation: bad_names += bad_dict["bad_by_correlation"]
+        if prep_deviation:   bad_names += bad_dict["bad_by_deviation"]
+        if prep_hf_noise:    bad_names += bad_dict["bad_by_hf_noise"]
+        if prep_nan_flat:    bad_names += bad_dict["bad_by_nan"] + bad_dict["bad_by_flat"]
 
         # Merge with any existing bads
         old_bads = set(self.raw.info.get("bads", []))
@@ -370,7 +421,7 @@ class EEGPreprocessor:
         self.raw.info["bads"] = merged_bads
 
         # Second PREP pass using RANSAC
-        if cfg.prep_ransac:
+        if prep_ransac:
             # Identifies bad channels by RANSAC
             # Random sample consensus approach to predict what the signal should be for each channel 
             # based on the signals and spatial locations of other currently-good channels
@@ -402,7 +453,7 @@ class EEGPreprocessor:
             "frac_bad"       : frac_bad,
         }
         
-    def _apply_interpolation_bad_channels(self) -> None:
+    def _apply_interpolation_bad_channels(self, params: Mapping[str, Any]) -> None:
         """Interpolate bad channels using Raw.interpolate_bads"""
         
         before = list(self.raw.info["bads"])
@@ -411,7 +462,7 @@ class EEGPreprocessor:
             return
 
         self.raw.interpolate_bads(
-            reset_bads=self.config.reset_bads_after_interp
+            reset_bads=bool(params.get('reset_bads', params.get('reset_bads_after_interp', True)))
         )
         after = list(self.raw.info["bads"])
 
@@ -528,12 +579,15 @@ class EEGPreprocessor:
                     f"channel change: {exc}"
                 )
 
-    def _apply_rereference(self) -> None:
-        """Apply re-referencing using ChannelSet.RerefMatrix and update the Raw object"""
-        cfg = self.config
+    def _apply_rereference(self, params: Mapping[str, Any]) -> None:
+        """Apply re-referencing using ChannelSet.RerefMatrix and update Raw"""
 
         # Compute rereferencing matrix from the ChannelSet
-        m = np.array(self.ch_set.RerefMatrix(cfg.reref_channels))
+        channels = params.get('channels')
+        if channels is None:
+            raise ValueError("[Re-reference] 'channels' must be provided")
+
+        m = np.array(self.ch_set.RerefMatrix(channels))
 
         # New ChannelSet describing the rereferenced channels
         new_ch_set = self.ch_set.copy().spfilt(m)
@@ -553,13 +607,14 @@ class EEGPreprocessor:
         if self.verbose:
             print("[EEGPreprocessor] Applied re-reference.")
 
-    def _apply_spatialfilter(self) -> None:
-        """Apply a spatial filter (e.g., SLAP) via ChannelSet and update the Raw object"""
-        cfg = self.config
+    def _apply_spatialfilter(self, params: Mapping[str, Any]) -> None:
+        """Apply spatial filter (e.g., SLAP) and update Raw"""
 
         # Compute spatial filter matrix from the ChannelSet
-        if cfg.spatial_exclude:
-            m = np.array(self.ch_set.SLAP(exclude=cfg.spatial_exclude))
+        exclude = params.get('exclude')
+
+        if exclude:
+            m = np.array(self.ch_set.SLAP(exclude=exclude))
         else:
             m = np.array(self.ch_set.SLAP())
 
@@ -581,16 +636,18 @@ class EEGPreprocessor:
         if self.verbose:
             print("[EEGPreprocessor] Applied spatial filter.")
 
-    def _apply_annotation(self, plot=False) -> None:
+    def _apply_annotation(self, params: Mapping[str, Any]) -> None:
         """Launch an interactive Raw plot to mark BAD_region annotations and record bad file time percentage"""
-        
+        plot = bool(params.get("plot", True))
+
         # Initialize an empty Annotations object with a 'BAD_region' label
         region_name = "BAD_region"
         annot       = mne.Annotations([0], [0], [region_name])
         # Set the annotations to the RAW object
         self.raw.set_annotations(annot)
         # Open an interactive plot of the RAW data for visual inspection and marking
-        self.raw.plot(block=True)
+        if plot:
+            self.raw.plot(block=True)
         
         # Evaluate BAD regions
         # Extract annotations from the RAW object
@@ -621,7 +678,7 @@ class EEGPreprocessor:
             ax.spines["left" ].set_visible(False)
 
             # Add a text box at the end of the bar
-            text_str = f"Discarded file (Time): {total_percent:.2f}%"
+            text_str = f"Bad Segments: {total_percent:.2f}%"
             ax.text(
                 fileTime,
                 0.5,
@@ -632,4 +689,3 @@ class EEGPreprocessor:
             )
             plt.show()
         
-
