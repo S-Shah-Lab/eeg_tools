@@ -35,9 +35,7 @@ import helper.eeg_dict as eeg_dict
 
 @dataclass
 class EEGPreprocessorConfig:
-    """
-    TODO
-    """
+    """Configuration setting class"""
 
     # Notch
     run_notch   : bool                                = False
@@ -88,8 +86,6 @@ class EEGPreprocessor:
         5) Re-reference                  (ChannelSet.RerefMatrix) [optional]
         6) patial filter                 (ChannelSet.SLAP)        [optional]
         7) Manual BAD segment annotation (Raw.plot)               [optional]
-
-    TODO description
     """
 
     def __init__(
@@ -102,6 +98,8 @@ class EEGPreprocessor:
         conv_dict: Optional[dict] = None,
         verbose: bool = False,
     ) -> None:
+        """Initialize the preprocessor with an MNE Raw object, channel metadata, and step configuration"""
+        
         if not isinstance(raw, BaseRaw):
             raise TypeError("`raw` must be an instance of mne.io.BaseRaw.")
 
@@ -147,16 +145,8 @@ class EEGPreprocessor:
 
     # Public API --------------------------------------------------------------
     def run(self) -> Tuple[BaseRaw, Dict[str, Any]]:
-        """
-        Run the full preprocessing pipeline in the prescribed order
-
-        Returns
-        -------
-        raw : mne.io.BaseRaw
-            Processed Raw object (reference to self.raw)
-        history : dict
-            Metadata about processing steps
-        """
+        """Run the configured preprocessing pipeline and return the processed Raw plus a step-by-step history dict"""
+        
         if self.config.run_notch:
             self._apply_notch_filter()
 
@@ -181,7 +171,7 @@ class EEGPreprocessor:
     # Helpers -----------------------------------------------------------------
     
     def _infer_montage_type(self, n_ch: int) -> Optional[str]:
-        """TODO"""
+        """Infer the montage type identifier from the number of EEG channels in the recording"""
         if n_ch in (21, 24):
             return "DSI_24"
         if n_ch == 32:
@@ -196,10 +186,7 @@ class EEGPreprocessor:
         self,
         ch_names: List[str],
     ) -> Optional[mne.channels.DigMontage]:
-        """
-        Recreate montage selection logic used in EEGRawImporter._make_raw_with_montage
-        Returns a DigMontage that matches the provided channel names
-        """
+        """Build a DigMontage with standard electrode locations matching the importer's montage conventions"""
         montage_type = self._montage_type or self._infer_montage_type(len(ch_names))
         if montage_type is None:
             return None
@@ -297,7 +284,7 @@ class EEGPreprocessor:
         print(f"[EEGPreprocessor] Notch filter at {freqs}")
 
     def _apply_bandpass_filter(self) -> None:
-        """Apply band-pass (or high-/low-pass) to EEG channels with Raw.filter"""
+        """Apply band-pass (or high/low-pass) filtering to EEG channels using Raw.filter"""
         cfg = self.config
         
         if cfg.l_freq is None and cfg.h_freq is None:
@@ -323,7 +310,7 @@ class EEGPreprocessor:
         
     def _apply_prep(self) -> None:
         """
-        Apply PREP-like bad-channel detection using pyprep.NoisyChannels
+        Detect noisy EEG channels with PREP (pyprep.NoisyChannels) and update raw.info['bads']
         More details about methods and thresholds can be found here:
         https://pyprep.readthedocs.io/en/latest/generated/pyprep.NoisyChannels.html
         """
@@ -540,9 +527,7 @@ class EEGPreprocessor:
                 )
 
     def _apply_rereference(self) -> None:
-        """
-        Apply re-referencing using ChannelSet.RerefMatrix and update Raw.
-        """
+        """Apply re-referencing using ChannelSet.RerefMatrix and update the Raw object"""
         cfg = self.config
 
         # Compute rereferencing matrix from the ChannelSet
@@ -567,9 +552,7 @@ class EEGPreprocessor:
             print("[EEGPreprocessor] Applied re-reference.")
 
     def _apply_spatialfilter(self) -> None:
-        """
-        Apply spatial filter (e.g., SLAP) and update Raw.
-        """
+        """Apply a spatial filter (e.g., SLAP) via ChannelSet and update the Raw object"""
         cfg = self.config
 
         # Compute spatial filter matrix from the ChannelSet
@@ -597,9 +580,8 @@ class EEGPreprocessor:
             print("[EEGPreprocessor] Applied spatial filter.")
 
     def _apply_annotation(self, plot=False) -> None:
-        """ 
-        TODO
-        """
+        """Optionally plot the Raw for manual BAD segment marking and store the resulting annotations"""
+        
         # Initialize an empty Annotations object with a 'BAD_region' label
         region_name = "BAD_region"
         annot       = mne.Annotations([0], [0], [region_name])
