@@ -1,5 +1,12 @@
+"""
+MotorImageryPdfReport: class
+
+PDF report generator for motor imagery analysis results
+"""
+
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib import colors
 from reportlab.graphics import renderPDF
 from svglib.svglib import svg2rlg
@@ -10,7 +17,7 @@ import datetime
 from datetime import date
 from pathlib import Path
 from PIL import Image
-from typing import Literal, Optional, Tuple, Dict
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 
 XAnchor = Literal["left",     "center", "right"]
@@ -19,16 +26,19 @@ FitMode = Literal["preserve", "stretch"        ]
 
 
 class MotorImageryPdfReport:
+    """Create a PDF report from saved analysis plots and summary metadata"""
+    
     def __init__(
-        self, 
-        plot_folder: str, 
-        helper_folder: str, 
-        date_test: str = 'N/A', 
-        montage_name: str = 'N/A', 
+        self,
+        plot_folder: str,
+        helper_folder: str,
+        date_test: str = "N/A",
+        montage_name: str = "N/A",
         resolution: int = 1,
         age_at_test: str = "N/A",
-        save_folder: str = None,
-    ):
+        save_folder: Optional[str] = None,
+    ) -> None:
+        """Initialize report paths and metadata used to assemble the PDF"""
         
         self.plot_folder   = plot_folder
         self.helper_folder = helper_folder
@@ -71,10 +81,6 @@ class MotorImageryPdfReport:
             self.condition = "TBI"
         else:
             self.condition = 'N/A'
-        
-        
-        
-        
         
         
         self._create_canvas()
@@ -137,14 +143,14 @@ class MotorImageryPdfReport:
         """Move a point with coordinate y downward by dy"""
         return y - dy
 
-    def show_key_point(self, name, x, y, show=True) -> None:
+    def show_key_point(self, name: str, x: float, y: float, show: bool = True) -> None:
         """Generate anchor point at given coordinates on the PDF"""
         self.dict_alph[name] = [x, y]
         if show:
             self.c.setFont("Helvetica", 16) # Set the font for text display
             self.c.drawString(x, y, name)   # Draw the name at the specified coordinates
 
-    def draw_hline(self, x1, x2, y, color=colors.black, line_width=1, return_coord=True):
+    def draw_hline(self, x1: float, x2: float, y: float, color: Any = colors.black, line_width: float = 1.0, return_coord: bool = True) -> Optional[Dict[str, float]]:
         """Draws a horizontal line between x1 and x2 at a fixed y"""
         self.c.setStrokeColor(color)    # Set the line color
         self.c.setLineWidth(line_width) # Set the line width
@@ -152,7 +158,7 @@ class MotorImageryPdfReport:
         if return_coord:
             return {'x1': x1, 'x2': x2, 'y': y}
 
-    def draw_vline(self, x, y1, y2, color=colors.black, line_width=1, return_coord=True):
+    def draw_vline(self, x: float, y1: float, y2: float, color: Any = colors.black, line_width: float = 1.0, return_coord: bool = True) -> Optional[Dict[str, float]]:
         """Draws a vertical line between y1 and y2 at a fixed x"""
         self.c.setStrokeColor(color)    # Set the line color
         self.c.setLineWidth(line_width) # Set the line width
@@ -160,7 +166,7 @@ class MotorImageryPdfReport:
         if return_coord:
             return {'x': x, 'y1': y1, 'y2': y2}
 
-    def draw_dline(self, x1, y1, x2, y2, color=colors.black, line_width=1, return_coord=True):
+    def draw_dline(self, x1: float, y1: float, x2: float, y2: float, color: Any = colors.black, line_width: float = 1.0, return_coord: bool = True) -> Optional[Dict[str, float]]:
         """Draws a diagonal line from (x1, y1) to (x2, y2)"""
         self.c.setStrokeColor(color)    # Set the line color
         self.c.setLineWidth(line_width) # Set the line width
@@ -169,7 +175,7 @@ class MotorImageryPdfReport:
             return {'x1': x1, 'x2': x2, 'y1': y1, 'y2': y2}
 
     def _create_canvas(self) -> None:
-        """ TODO """
+        """Create a new canvas"""
         # Set up the canvas
         self.c = canvas.Canvas(
             os.path.join(self.save_folder, self.output_name),
@@ -177,11 +183,11 @@ class MotorImageryPdfReport:
         )
         
     def _next_page(self) -> None:
-        """ TODO """
+        """Force document into creating a new page"""
         self.c.showPage()
         
     def _get_canvas_dims(self, margin: int = 15) -> None:
-        """ TODO """
+        """Create a dictionary of canvas dimensions"""
         # Canvas dimensions
         width, height = letter  # Get the dimensions of the page
         xmin = 0
@@ -203,7 +209,7 @@ class MotorImageryPdfReport:
         self.canvas_dim['margin']  = margin
 
     def _create_corner_points(self) -> None:
-        """ TODO """
+        """Create corner points with appropriate coordinates"""
         # Coordinates of the corners
         self.top_left = (
             self.move_right_by(self.canvas_dim['xleft'], self.canvas_dim['margin']),
@@ -227,7 +233,7 @@ class MotorImageryPdfReport:
         self.page_height = self.top_right[1] - self.bottom_right[1]
 
     def _create_page_sections(self) -> None:
-        """ TODO """
+        """Create points and lines to split a page into needed sections"""
         # Break down the page into 20 units
         h_ = self.page_height / 20
         # Define a space 2 units from top of page (splits upper section from header)
@@ -365,8 +371,8 @@ class MotorImageryPdfReport:
     # -------------------------------------------------------------------------
     # METHODS FOR PLOTTING
     # -------------------------------------------------------------------------
-    def _write_text(self, text_list, x, y, font_size=12, bold_flags=None, align="center"):
-        """Writes a list of texts at a specified position with optional bold and alignment.
+    def _write_text(self, text_list: List[str], x: float, y: float, font_size: int = 12, bold_flags: Optional[List[bool]] = None, align: str = "center") -> None:
+        """Writes a list of texts at a specified position with optional bold and alignment
 
         Args:
             text_list (list): List of texts to be displayed
@@ -545,7 +551,7 @@ class MotorImageryPdfReport:
     # -------------------------------------------------------------------------
     # Page 1
     def _generate_header(self) -> None:
-        """ TODO """
+        """Populate header with text"""
         # Write the HEADER with subject and measurement information
         y0 = 15
         dx = 10
@@ -662,7 +668,7 @@ class MotorImageryPdfReport:
         )
 
     def _plot_timeline(self) -> None:
-        """ TODO """
+        """Plot paradigm timeline"""
         dy         = 5
         width      = 500
         image_path = os.path.join(self.plot_folder, "paradigm_timeline.svg")
@@ -677,7 +683,7 @@ class MotorImageryPdfReport:
             )
 
     def _plot_topoplots(self) -> None:
-        """ TODO """
+        """Plot band topoplots with signed r^2 coefficients"""
         dy     = 130
         height = 300
         
@@ -718,7 +724,7 @@ class MotorImageryPdfReport:
             )
 
     def _plot_band_effects(self) -> None:
-        """ TODO """
+        """Plot bootstrap CI per band"""
         dy         = 5
         width      = 450
         image_path = os.path.join(self.plot_folder, "band_effect.svg")
@@ -732,10 +738,9 @@ class MotorImageryPdfReport:
                 width=width,
             )
 
-
     # Page 2 - psds
     def _plot_brain(self) -> None:
-        """ TODO """
+        """Plot brain icon with arrows"""
         
         y_mid = abs(self.dict_alph['J'][1] - self.dict_alph['L'][1]) / 2
         width      = 85
@@ -844,7 +849,7 @@ class MotorImageryPdfReport:
         )
 
     def _plot_psds(self) -> None:
-        """ TODO """  
+        """Plot PSDs of selected channels"""  
         
         y_mid = abs(self.dict_alph['J'][1] - self.dict_alph['L'][1]) / 2
         width = 200
@@ -939,10 +944,9 @@ class MotorImageryPdfReport:
                     width=int(width * 0.85),
                 )
             
-        
     # Page 3 - stats
     def _plot_stat_dist(self) -> None:
-        """ TODO """
+        """Plot permutation and bootstrap distribution results"""
         
         dy     = 5
         height = 200
@@ -972,7 +976,7 @@ class MotorImageryPdfReport:
             )
     
     def _plot_bridged_candidates(self) -> None:
-        """ TODO """
+        """Plot bridged candidates"""
         
         dy     = 5
         height = 250
