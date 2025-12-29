@@ -6,14 +6,11 @@ PDF report generator for motor imagery analysis results
 
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from reportlab.pdfgen.canvas import Canvas
 from reportlab.lib import colors
 from reportlab.graphics import renderPDF
 from svglib.svglib import svg2rlg
-import xml.etree.ElementTree as ET
 
 import os
-import datetime
 from datetime import date
 from pathlib import Path
 from PIL import Image

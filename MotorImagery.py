@@ -1,13 +1,13 @@
 """
 EEGMotorImagery: class
 
-TODO
+Provides epoching, spectral feature computation, statistical testing, and report-ready plotting for motor imagery paradigms
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import re, os
 import numpy as np
@@ -15,6 +15,8 @@ import mne
 from mne.io import BaseRaw
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.font_manager import FontProperties
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -25,9 +27,7 @@ from scipy.signal import hilbert
 
 
 class EEGMotorImagery:
-    """
-    Docstring for EEGMotorImagery
-    """
+    """Full set of operations to run motor imagery analysis"""
     def __init__(
         self,
         raw    : BaseRaw,
@@ -114,8 +114,8 @@ class EEGMotorImagery:
         
     
     @staticmethod
-    def step_down_events(signal, time=None, tol=0.0):
-        """TODO"""
+    def step_down_events(signal: np.ndarray, time: Optional[np.ndarray] = None, tol: float = 0.0) -> List[Tuple[int, int]]:
+        """Identify downward step changes in a trigger-like signal and return onset/offset indices and durations"""
         if time is None: time = np.arange(signal.size)
         else:
             time = np.asarray(time)
@@ -139,8 +139,8 @@ class EEGMotorImagery:
         return onset, offset, durations
     
     @staticmethod
-    def find_step_intervals(signal, threshold=0.):
-        """TODO"""
+    def find_step_intervals(signal: np.ndarray, threshold: float = 0.) -> List[Tuple[int, int]]:
+        """Return onset and offset indices for contiguous intervals where the signal exceeds a threshold"""
         active = signal > threshold
         changes = np.diff(active.astype(int))
         onsets = np.where(changes == 1)[0] + 1
@@ -227,7 +227,7 @@ class EEGMotorImagery:
 
     @staticmethod
     def neg_p(p: float) -> float:
-        """Convert p to -log10(p) for a compact 'evidence' score"""
+        """Convert p to -log(p) for a compact 'evidence' score"""
         p = float(np.clip(p, 1e-300, 1.0))
         #return -np.log10(p)
         return float(-np.log(p))
@@ -258,7 +258,7 @@ class EEGMotorImagery:
 
     @staticmethod
     def build_custom_cmap(colors: List[str]) -> matplotlib.colormaps:
-        """TODO"""
+        """Create a simple three-point diverging colormap from [low, mid, high] color specifications"""
         
         c1, c2, c3 = colors
         
@@ -270,8 +270,8 @@ class EEGMotorImagery:
 
         return LinearSegmentedColormap.from_list("custom_cmap", colors)
      
-    def _evaluate_motorimagery_paradigm(self, swap=True):
-        """TODO"""
+    def _evaluate_motorimagery_paradigm(self, swap: bool = True) -> None:
+        """Infer the motor imagery task/rest structure from trigger channels and annotate the Raw recording accordingly"""
         nEpochs       = self.nEpochs
         duration_task = self.duration_task
         skip          = self.skip
@@ -363,8 +363,8 @@ class EEGMotorImagery:
         my_annot = mne.Annotations(onset=onset_, duration=duration_, description=description_)
         self.raw.set_annotations(my_annot)
     
-    def _make_epochs_batch(self, event_id: int):
-        """TODO""" 
+    def _make_epochs_batch(self, event_id: int) -> mne.Epochs:
+        """Create fixed-length MNE Epochs for a single annotation event id using the configured task window"""
         
         tmin = 0
         tmax = (self.duration_task - self.skip) / self.nEpochs
@@ -385,8 +385,8 @@ class EEGMotorImagery:
         # (number of epochs, channel, t)
         return epochs_
 
-    def _generate_epochs(self):
-        """TODO"""
+    def _generate_epochs(self) -> None:
+        """Generate and store per-batch MNE Epochs from numbered task annotations, dropping unusable batches"""
         
         events_from_annot, event_dict = mne.events_from_annotations(self.raw, verbose=False)
         batches = [x for x in event_dict.keys() if any(char.isdigit() for char in x)]
@@ -430,8 +430,8 @@ class EEGMotorImagery:
         nPerSegment: int = None,
         nOverlap: int = None,
         aggregate_epochs: bool = True,
-    ):
-        """TODO"""
+    ) -> np.ndarray:
+        """Compute Welch PSDs for one epoch batch, with optional averaging across epochs for downstream statistics"""
         
         fs = self.raw.info['sfreq']
         tmin = self.epochs_dict[ batch ].times[ 0 ]
@@ -484,8 +484,8 @@ class EEGMotorImagery:
 
         return psd_
 
-    def _generate_psds(self):
-        """TODO"""
+    def _generate_psds(self) -> None:
+        """Compute and store PSDs for all epoch batches, keeping both epoch-averaged and per-epoch PSD arrays"""
         
         fs   = self.raw.info['sfreq'   ]
         fmin = self.raw.info['highpass']
@@ -532,8 +532,8 @@ class EEGMotorImagery:
         self.psds_dict = psds_dict
         self.psds_epochs_dict = psds_epochs_dict
     
-    def _grab_left_right_electrodes(self):
-        """TODO"""
+    def _grab_left_right_electrodes(self) -> Tuple[List[str], List[str]]:
+        """Split motor-imagery channels into left/right hemispheres using montage x-coordinates and store masks"""
         
         dict_chs = self.raw.get_montage().get_positions()['ch_pos']
         # Consider all left and right channels
@@ -557,7 +557,7 @@ class EEGMotorImagery:
         x: np.ndarray,
         is_treatment: np.ndarray,
     ) -> np.ndarray:
-        """ Compute point-biserial correlation between features and a binary label"""
+        """Compute point-biserial correlation between features and a binary label"""
         x = np.asarray(x)
         is_treatment = np.asarray(is_treatment).astype(bool)
 
@@ -888,7 +888,7 @@ class EEGMotorImagery:
         transf: str = "r2",
         verbose: bool = True,
     ) -> Dict[str, Any]:
-
+        """Run band-wise statistical tests (including permutation/bootstrap where configured) and store results for later plots"""
         results: Dict[str, Any] = {}
 
         comparisons = [
@@ -1007,7 +1007,7 @@ class EEGMotorImagery:
         results: Optional[Dict[str, Any]] = None,
         figsize: Optional[Tuple[float, float]] = None,
         suptitle: Optional[str] = None,
-    ):
+    ) -> Tuple[Figure, np.ndarray]:
         """
         Plot permutation and bootstrap distributions across frequency bands
 
@@ -1144,7 +1144,7 @@ class EEGMotorImagery:
         figsize: Optional[Tuple[float, float]] = None,
         suptitle: Optional[str] = None,
         bad_channels: Optional[List[str]] = None,
-    ):
+    ) -> Figure:
         """Plot signed-r² topomaps in a layout mimicking the legacy pipeline"""
         # Ensure results exist and extract left/right comparisons
         results = results or self._ensure_stats_results(transf=transf)
@@ -1458,7 +1458,7 @@ class EEGMotorImagery:
         
         return fig, axs_rows
 
-    def _plot_frequency_bands(self, ax=None, ylim=None, fontsize=12, fraction=0.13):
+    def _plot_frequency_bands(self, ax: Optional[Axes] = None, ylim: Optional[Tuple[float, float]] = None, fontsize: int = 12, fraction: float = 0.13) -> None:
         """Adds frequency band annotations to a plot"""
         # Frequency band annotations with their upper limit and label position
         bands = {
@@ -1503,7 +1503,7 @@ class EEGMotorImagery:
         ch_name: str = "c3",
         signed_r2: bool = False,
         figsize: Tuple[float, float] = (5.0, 7.0),
-    ):
+    ) -> Figure:
         """Plot PSDs and frequency-wise R² for a single channel"""
         # Ensure PSDs and stats exist
         if not hasattr(self, "psds_dict"):
@@ -1750,7 +1750,7 @@ class EEGMotorImagery:
         transf: str = "r2",
         results: Optional[Dict[str, Any]] = None,
         figsize: Optional[Tuple[float, float]] = None,
-    ):
+    ) -> Figure:
         """
         Plot -ln(p) bootstrap p-values per band in two separate figures,
         mimicking the 'Left only' and 'Right only' plots from motorimagery.py
@@ -1992,8 +1992,8 @@ class EEGMotorImagery:
     # 1) Paradigm sanity: timeline plot + counts
     def _summarize_annotations(self) -> Dict[str, int]:
         """
-        Count occurrences of each annotation description.
-        Useful to sanity-check the paradigm parsing.
+        Count occurrences of each annotation description
+        Useful to sanity-check the paradigm parsing
         """
         annot = self.raw.annotations
         counts: Dict[str, int] = {}
@@ -2006,7 +2006,7 @@ class EEGMotorImagery:
         self,
         include_numbered: bool = False,
         figsize: Tuple[float, float] = (14.0, 3.0),
-    ):
+    ) -> Figure:
         """Plot the task/rest/BAD_region annotations as a horizontal timeline"""
         annot = self.raw.annotations
         if annot is None or len(annot) == 0:
@@ -2151,7 +2151,7 @@ class EEGMotorImagery:
         transf: str = "r2",
         ci: float = 95.0,
         figsize: Tuple[float, float] = (8.0, 4.0),
-    ):
+    ) -> Figure:
         """
         Forest plot: observed $\Delta$ per band with bootstrap CI,
         for left_vs_left_rest and right_vs_right_rest
@@ -2210,7 +2210,7 @@ class EEGMotorImagery:
         ax.set_yticklabels([bk.replace("Hz", " Hz") for bk in band_keys])
         ax.invert_yaxis()  # first bands at the top
         ax.set_xlabel(r"Observed $\Delta$", loc='right')
-        ax.set_title("Band-wise observed value with 95% CI", loc="left", fontsize=10)
+        ax.set_title("Band-wise observed value with 95% CI (bootstrap)", loc="left", fontsize=10)
         ax.legend(frameon=False)
         fig.tight_layout()
 
@@ -2252,7 +2252,7 @@ class EEGMotorImagery:
     def _resolve_picks_from_names(self, names_lower: List[str]) -> List[int]:
         """
         Resolve channel picks (indices) from a list of lowercase channel names,
-        in the Epochs' channel order.
+        in the Epochs' channel order
         """
         if not hasattr(self, "raw"):
             raise RuntimeError("Missing Raw.")
@@ -2321,9 +2321,9 @@ class EEGMotorImagery:
         roi: str = "contra",
         ci: float = 95.0,
         figsize: Tuple[float, float] = (10.0, 4.0),
-    ):
+    ) -> Figure:
         """
-        Plot within-trial bandpower across epoch segments, with a CI across trials.
+        Plot within-trial bandpower across epoch segments, with a CI across trials
 
         roi:
         - "contra": contralateral motor channels
@@ -2410,10 +2410,10 @@ class EEGMotorImagery:
         band: Tuple[float, float],
         ci: float = 95.0,
         figsize: Tuple[float, float] = (10.0, 4.0),
-    ):
+    ) -> Figure:
         """
-        Laterality index (contra - ipsi) / (contra + ipsi) within trial.
-        Computed on bandpower envelopes per segment.
+        Laterality index (contra - ipsi) / (contra + ipsi) within trial
+        Computed on bandpower envelopes per segment
         """
         task_prefix_l = task_prefix.lower().rstrip("_")
         contra_names = self.chRight if task_prefix_l.startswith("left") else self.chLeft
@@ -2466,7 +2466,4 @@ class EEGMotorImagery:
             fig.savefig(os.path.join(self.save_path, fname), bbox_inches="tight")
 
         return fig, ax
-
-
-
 
