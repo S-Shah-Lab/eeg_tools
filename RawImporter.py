@@ -1,7 +1,7 @@
 """
 EEGRawImporter: class
 
-This script is a standalone utility that imports a .dat or .fif file
+This script is a standalone utility that imports a .dat files
 Generates a mne.io.Raw object with a montage and, if specified, stimulus channels
 """
 
@@ -59,7 +59,7 @@ class EEGRawImporter:
             "date_test"  : date_test,
         }
         
-    def _resolve_path(self, fname: str) -> Dict[str, Any]:
+    def _resolve_path(self, fname: str) -> str:
         """Resolve a helper-file path relative to helper_dir or the current working directory"""
         try:
             path_dummy = os.path.join(self.helper_dir, fname)

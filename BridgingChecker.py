@@ -19,11 +19,13 @@ This module provides the `BridgingChecker` class, which:
 
 import os, sys
 
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 
 import mne
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.axes   import Axes
+from matplotlib.figure import Figure
 from matplotlib.colors import ListedColormap
 
 if "IPython" in sys.modules:
@@ -70,10 +72,10 @@ class BridgingChecker:
             Threshold to use on the correlation-affinity product to identify candidates
         show_extra: bool
             Flag to display matrices in the bridging analysis
-        figure:
-            TODO
-        axes:
-            TODO
+        figure : matplotlib.figure.Figure, optional
+            Figure to draw into when plotting is enabled
+        axes : matplotlib.axes.Axes, optional
+            Axes to draw into when plotting is enabled
         """
 
         self.raw                    = raw.copy()
@@ -443,7 +445,7 @@ class BridgingChecker:
         )
         ax.set_title(title, fontsize=10)
 
-    def _plot_bridged_candidates(self, figure=None, axes=None) -> None:
+    def _plot_bridged_candidates(self, figure: Optional[Figure] = None, axes: Optional[Axes] = None) -> None:
         """Plot the final candidate groups on the topoplot"""
         import matplotlib.pyplot as plt
         from matplotlib.gridspec import GridSpec
@@ -495,7 +497,7 @@ class BridgingChecker:
             
         return fig2
         
-    def run_bridge_analysis(self, plot=True, figure=None, axes=None) -> List[List[str]]:
+    def run_bridge_analysis(self, plot: bool = True, figure: Optional[Figure] = None, axes: Optional[Axes] = None) -> List[List[str]]:
         """Run windowed bridge analysis on the normalized EEG data"""
         if self.verbose:
             print("[BridgingChecker] Running windowed bridge analysis..")

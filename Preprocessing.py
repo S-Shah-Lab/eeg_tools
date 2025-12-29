@@ -35,7 +35,7 @@ import helper.eeg_dict as eeg_dict
 
 @dataclass
 class EEGPreprocessorConfig:
-    """Configuration setting class"""
+    """Configuration container for enabling preprocessing steps and their parameters"""
 
     # Notch
     run_notch   : bool                                = False
@@ -86,6 +86,8 @@ class EEGPreprocessor:
         5) Re-reference                  (ChannelSet.RerefMatrix) [optional]
         6) patial filter                 (ChannelSet.SLAP)        [optional]
         7) Manual BAD segment annotation (Raw.plot)               [optional]
+        
+    Provides a configurable sequence of filters, channel cleaning, and annotation-based rejection
     """
 
     def __init__(
@@ -186,7 +188,7 @@ class EEGPreprocessor:
         self,
         ch_names: List[str],
     ) -> Optional[mne.channels.DigMontage]:
-        """Build a DigMontage with standard electrode locations matching the importer's montage conventions"""
+        """Build a DigMontage with standard electrode locations matching the montage conventions"""
         montage_type = self._montage_type or self._infer_montage_type(len(ch_names))
         if montage_type is None:
             return None
@@ -580,7 +582,7 @@ class EEGPreprocessor:
             print("[EEGPreprocessor] Applied spatial filter.")
 
     def _apply_annotation(self, plot=False) -> None:
-        """Optionally plot the Raw for manual BAD segment marking and store the resulting annotations"""
+        """Launch an interactive Raw plot to mark BAD_region annotations and record bad file time percentage"""
         
         # Initialize an empty Annotations object with a 'BAD_region' label
         region_name = "BAD_region"
