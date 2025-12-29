@@ -50,6 +50,8 @@ class BridgingChecker:
         save_path: str = None,
     ) -> None:
         """
+        Initialize the bridging checker with analysis parameters and an optional MNE Raw object
+        
         Parameters
         ----------
         raw : mne.io.BaseRaw
@@ -121,9 +123,7 @@ class BridgingChecker:
             raise RuntimeError("mne.io.Raw object is not initialized")
 
     def _get_qc_data(self) -> Tuple[np.ndarray, List[str], mne.Info]:
-        """
-        Return EEG data matrix, channel names and info used for analysis
-        """
+        """Band-pass filter the Raw to the configured frequency range when needed"""
         data     = self.raw.get_data(picks="eeg")
         eeg_chs  = data.shape[0]
         ch_names = self.raw.ch_names[:eeg_chs]
@@ -183,26 +183,15 @@ class BridgingChecker:
 
     @staticmethod
     def _gaussian(x: float, sigma: float) -> float:
-        """Value of a Gaussian kernel with standard deviation sigma at x"""
+        """Evaluate a Gaussian kernel value for a distance using standard deviation sigma"""
         return float(
             np.exp(-(x ** 2) / (2.0 * sigma ** 2))
             / (sigma * np.sqrt(2.0 * np.pi))
         )
 
     def _distance_matrix(self, x: np.ndarray) -> np.ndarray:
-        """
-        Compute pairwise distances between channel using the provided time series
-
-        Parameters
-        ----------
-        x : np.ndarray
-            Data matrix with shape (n_channels, n_samples)
-
-        Returns
-        -------
-        d : np.ndarray
-            Symmetric distance matrix in arbitrary amplitude units
-        """
+        """Compute pairwise distances between channel using the provided time series"""
+        
         n_channels = x.shape[0]
         d = np.zeros((n_channels, n_channels), dtype=float)
 
@@ -409,10 +398,7 @@ class BridgingChecker:
         ax: plt.Axes,
         title: str,
     ) -> None:
-        """
-        Plot a topomap where all channels share a base color and each group of
-        channels (given by index in `info["ch_names"]`) has its own color
-        """
+        """Plot a topomap where each candidate group has its own color"""
         # Use all EEG channels for the topomap
         picks = mne.pick_types(info, eeg=True, exclude=())
         sub_info = mne.pick_info(info, sel=picks)
