@@ -154,7 +154,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     # Report
     parser.add_argument("--skip-report", action="store_true", help="Skip PDF report generation")
-    parser.add_argument("--age-at-test", default="20",        help="Age at test (string, used in the PDF header)")
+    parser.add_argument("--age-at-test", default="N/A",        help="Age at test (string, used in the PDF header)")
 
     return parser
 
