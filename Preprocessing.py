@@ -114,7 +114,7 @@ class EEGPreprocessor:
         3) PREP bad-channel detection    (NoisyChannels)          [optional]
         4) Interpolate bad channels      (Raw.interpolate_bads)   [optional]
         5) Re-reference                  (ChannelSet.RerefMatrix) [optional]
-        6) patial filter                 (ChannelSet.SLAP)        [optional]
+        6) Spatial filter                 (ChannelSet.SLAP)       [optional]
         7) Manual BAD segment annotation (Raw.plot)               [optional]
 
     Provides a configurable sequence of filters, channel cleaning, and annotation-based rejection.
@@ -425,7 +425,13 @@ class EEGPreprocessor:
             # Identifies bad channels by RANSAC
             # Random sample consensus approach to predict what the signal should be for each channel 
             # based on the signals and spatial locations of other currently-good channels
-            nc_r = NoisyChannels(self.raw, do_detrend=False)
+            prev_bads = list(self.raw.info.get("bads", []))
+
+            # Run RANSAC only on currently-good channels
+            good_chs = [ch for ch in self.raw.ch_names if ch not in prev_bads]
+            raw_ransac = self.raw.copy().pick_channels(good_chs)
+
+            nc_r = NoisyChannels(raw_ransac, do_detrend=False)
             nc_r.find_bad_by_ransac(
                 n_samples=50,
                 sample_prop=0.25,
@@ -435,13 +441,11 @@ class EEGPreprocessor:
                 channel_wise=False,
                 max_chunk_size=None,
             )
+
             bad_dict_r = nc_r.get_bads(as_dict=True)
-            merged_bads = sorted(
-                set(self.raw.info["bads"]).union(
-                    set(bad_dict_r["bad_by_ransac"])
-                )
-            )
-            self.raw.info["bads"] = merged_bads
+
+            # Merge back into the original Raw
+            self.raw.info["bads"] = sorted(set(prev_bads).union(set(bad_dict_r["bad_by_ransac"])))
 
         # Fraction of bad EEG channels
         n_eeg    = self.raw.get_data(picks="eeg").shape[0]

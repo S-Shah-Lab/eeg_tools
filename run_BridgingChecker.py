@@ -65,8 +65,6 @@ def main(argv: list[str] | None = None) -> None:
     imp = EEGRawImporter(
         path_to_file=args.file_path,
         helper_dir=args.helper_dir,
-        keep_stim=args.keep_stim,
-        verbose=args.import_verbose,
     )
 
     file_name = args.file_path.split('/')[-1].split('.')[0]

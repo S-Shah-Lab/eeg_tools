@@ -14,10 +14,8 @@ A Python toolkit for **EEG motor imagery** pipelines built around **BCI2000 `.da
 - **`PdfReport.py`**: Assembles plots into a **PDF report**.
 
 ### CLI entry points
-- `run_RawImporter.py`
 - `run_BridgingChecker.py`
-- `run_Preprocessing.py`
-- `run_MotorImagery.py` (full pipeline + PDF report)
+- `run_MotorImagery.py`
 
 Helper assets (montage locations, etc.) live in `eeg_tools/helper/`.
 
@@ -39,52 +37,21 @@ This package assumes you already live in Python EEG-land:
 
 ---
 
-## Quickstart: full motor imagery pipeline (recommended)
-
-`run_MotorImagery.py` runs:
-1) import (`.dat` → `mne.Raw`)
-2) (optional) bridging analysis
-3) (optional) preprocessing
-4) (optional) motor imagery analysis
-5) (optional) PDF report
-
-### Minimal run (provide the `.dat` file path)
-```bash
-python eeg_tools/run_MotorImagery.py \
-  --file-path /path/to/sub-XXX_ses-01_task-MotorImag_run-01.dat \
-  --helper-dir eeg_tools/helper
-```
-
-### Output
-If you do not set `--save-path`, outputs go to:
-```
-<root>/<base_name_without_ext>/
-```
-and include:
-- plots from bridging / preprocessing / analysis
-- a generated PDF report (if not skipped)
-
----
-
-## 1. Importing (standalone)
+## 1. Importing (module)
   ```bash
-  python eeg_tools/run_RawImporter.py \
-    --file-path /path/to/recording.dat \
-    --helper-dir eeg_tools/helper \
-    --keep-stim \
-    --verbose
+  RawImporter.py
   ```
 
   Key parameters:
   - `--keep-stim`: allows to keep stim channels attached to the mne.io.Raw object
 
   Note: 
-  - `run_RawImporter.py` is a tool that is used by other tools; by itself it is not very useful other than printing some information to the monitor
+  - `RawImporter.py` is a module that is imported by other scripts e.g. `run_BridgingChecker.py`
+  - Look at `run_BridgingChecker.py` in the next section for a proper implementation or API usage below
   
 ---
 
 ## 2. Bridged-channel QC (standalone)
-
   Run the bridging checker directly:
   ```bash
   python eeg_tools/run_BridgingChecker.py \
@@ -104,42 +71,62 @@ and include:
 
   Note: 
   - `run_BridgingChecker.py` has optimized parameters, the bridged channel groups are only candidates, but if the results are weird, feel free to change the default parameters
-  ---
+  
+---
 
-## 3. Preprocessing (standalone)
+## 3. Preprocessing (module)
   ```bash
-  python eeg_tools/run_Preprocessing.py \
-    --file-path /path/to/recording.dat \
-    --helper-dir eeg_tools/helper
+  Preprocessing.py
   ```
   
-  You can disable steps:
-  - `--no-notch`
-  - `--no-bandpass`
-  - `--no-prep`
-  - `--no-annotation`
-  - `--no-interpolation`
-  - `--no-rereference`
-  - `--no-spatialfilter`
-  
-  ...and control parameters like:
-  - `--notch-freqs` (default 60)
-  - `--bandpass-lfreq`, `--bandpass-hfreq`
-  - PREP toggles: `--prep-no-correlation`, `--prep-no-deviation`, etc.
+  These are all the steps that can be performed, they are all optional:
+    - `Notch filter`                  (Raw.notch_filter)       [optional]
+    - `Band-pass filter`              (Raw.filter)             [optional]
+    - `PREP bad-channel detection`    (NoisyChannels)          [optional]
+    - `Interpolate bad channels`      (Raw.interpolate_bads)   [optional]
+    - `Re-reference`                  (ChannelSet.RerefMatrix) [optional]
+    - `Spatial filter`                (ChannelSet.SLAP)        [optional]
+    - `Manual BAD segment annotation` (Raw.plot)               [optional]
+
+  Note: 
+  - `Preprocessing.py` is a module that is imported by other scripts e.g. `run_BridgingChecker.py`
+  - A `config` dictionary needs to be passed to the class to initialize the steps properly
+  - Look at `run_MotorImagery.py` in the next section for a proper implementation or API usage below
 
 ---
 
-## Motor imagery analysis details
+## 4. Motor Imagery Analysis
 
-The analysis is designed around "time-frequency" in a pragmatic sense:
+The analysis is designed as follows:
 
-- **Time:** trials are split into `--n-epochs` segments per trial after skipping `--skip` seconds.
-- **Frequency:** Welch PSD is computed per segment with resolution `--resolution` (Hz/bin).
-- **Bands:** defined by edges in `--freq-bands` (default `4,8,13,31`).
+- Each trial is split into `--n-epochs` segments after skipping `--skip` seconds after instruction
+-  Welch PSD is computed per segment with resolution `--resolution` (Hz/bin)
+- A statistical analysis is performed for each frequency band, defined by edges in `--freq-bands` (default `4,8,13,31`)
 
 Stats are computed with:
-- permutation testing (number of simulations `--n-sim`)
-- bootstrap testing for robustness / uncertainty reporting
+- Permutation testing
+- Bootstrap testing for robustness / uncertainty reporting
+
+Quickstart: full pipeline (recommended)
+
+`run_MotorImagery.py` runs:
+1) import (`.dat` → `mne.Raw`)
+2) (optional) bridging analysis
+3) (optional) preprocessing
+4) (optional) motor imagery analysis
+5) (optional) PDF report
+
+### Minimal run (provide the `.dat` file path)
+```bash
+python eeg_tools/run_MotorImagery.py \
+  --file-path /path/to/sub-XXX_ses-01_task-MotorImag_run-01.dat \
+  --helper-dir eeg_tools/helper
+  --save-path ./outputs
+```
+
+### Output
+- plots from bridging / preprocessing / analysis
+- a generated PDF report (if not skipped)
 
 ---
 
@@ -165,14 +152,14 @@ python eeg_tools/run_MotorImagery.py --file-path /path/to/file.dat --skip-report
 python eeg_tools/run_MotorImagery.py \
   --file-path /path/to/file.dat \
   --freq-bands 4,8,13,30,45 \
-  --resolution 0.5
+  --resolution 2.0
 ```
 
 ---
 
 ## Python API usage (direct)
 
-### Import a recording
+### 1. Import a recording
 ```python
 from eeg_tools.RawImporter import EEGRawImporter
 
@@ -187,7 +174,7 @@ raw = imp.raw          # mne.io.Raw
 ch_set = imp.ch_set    # BCI2000Tools ChannelSet
 ```
 
-### Bridging checker
+### 2. Bridging checker
 ```python
 from eeg_tools.BridgingChecker import BridgingChecker
 
@@ -203,13 +190,13 @@ bc = BridgingChecker(
 )
 ```
 
-### Preprocessing
+### 3. Preprocessing
 ```python
 from eeg_tools.Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
 
 config = EEGPreprocessorConfig([
     ("notch", {"freqs": 60.0, "kwargs": {}}),
-    ("bandpass", {"l_freq": 1.0, "h_freq": 100.0, "kwargs": {}}),
+    ("bandpass", {"l_freq": 1.0, "h_freq": 40.0, "kwargs": {}}),
     ("prep", {"random_state": 83092, "correlation": True, "deviation": True,
               "hf_noise": True, "nan_flat": True, "ransac": True}),
     ("interpolation", {"reset_bads_after_interp": True}),
@@ -220,7 +207,7 @@ preproc = EEGPreprocessor(raw, ch_set, config=config, copy=True, verbose=False)
 raw_clean, history = preproc.run()
 ```
 
-### Motor imagery analysis + plots
+### 4. Motor Imagery Analysis
 ```python
 from eeg_tools.MotorImagery import EEGMotorImagery
 
@@ -240,7 +227,7 @@ mi = EEGMotorImagery(
 )
 ```
 
-### PDF report
+### 5. PDF report
 ```python
 from eeg_tools.PdfReport import MotorImageryPdfReport
 
@@ -258,10 +245,9 @@ MotorImageryPdfReport(
 ---
 
 ## Data assumptions
-
-- Input is a **BCI2000 `.dat`** file readable by `BCI2000Tools.FileReader.bcistream`.
-- Montages are inferred via helper files, unless overridden in the CLI using `--montage-type`.
-- Some workflows may include stimulus/state channels; use `--keep-stim` if you need them.
+- Input is a **BCI2000 `.dat`** file readable by `BCI2000Tools.FileReader.bcistream`
+- Montages are inferred via helper files, unless overridden in the CLI using `--montage-type`
+- Some workflows may include stimulus/state channels; use `--keep-stim` if you need them
 
 ---
 
@@ -289,13 +275,14 @@ eeg_tools/
 ## Troubleshooting
 
 - **`ModuleNotFoundError: BCI2000Tools...`**
-  You need the BCI2000 Python tools installed and importable.
+  You need the BCI2000 Python tools installed and importable
+    `pip install BCI2000Tools`
 
 - **PDF report generation fails**
-  Ensure `reportlab`, `svglib`, and `Pillow` are installed. The report generator also expects certain plot files to exist in the output folder.
+  Ensure `reportlab`, `svglib`, and `Pillow` are installed. The report generator also expects certain plot files to exist in the output folder
 
 - **Montage/channel name mismatches**
-  Check `eeg_tools/helper/` location files and `helper/eeg_dict.py`, or override montage selection with `--montage-type`.
+  Check `eeg_tools/helper/` location files and `helper/eeg_dict.py`, or override montage selection with `--montage-type`
 
 ---
 
