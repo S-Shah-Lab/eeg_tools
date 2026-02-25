@@ -66,7 +66,7 @@ and include:
 
 ---
 
-## Importing (standalone)
+## 1. Importing (standalone)
 ```bash
 python eeg_tools/run_RawImporter.py \
   --file-path /path/to/recording.dat \
@@ -83,25 +83,30 @@ Note:
   
 ---
 
-## Bridged-channel QC (standalone)
+## 2. Bridged-channel QC (standalone)
 
 Run the bridging checker directly:
 ```bash
 python eeg_tools/run_BridgingChecker.py \
   --file-path /path/to/recording.dat \
-  --helper-dir eeg_tools/helper \
-  --save-path /path/to/output_folder
+  --helper-dir ./helper  \
+  --show-extra \
+  --save-path /path/to/output_folder \
+  --verbose
 ```
 
 Key parameters:
-- `--fmin`, `--fmax`: band-pass bounds for the QC signal
-- `--sigma`: Gaussian kernel width for affinity
-- `--window-sec`: sliding window length (non-overlapping)
-- `--bridge-score-threshold`: threshold on *(correlation × affinity)*
+- `--fmin`, `--fmax`: Band-pass filter; default = 1.0, 40.0
+- `--sigma`: Gaussian kernel width for affinity; default = 0.05 (don't change)
+- `--window-sec`: Sliding window length (non-overlapping); default = 10.0 
+- `--bridge-score-threshold`: Threshold on *(correlation × affinity)*; default = 0.095 (don't change)
+- `--show-extra`: Optional, will show plots but still generate output image of bridged candidates
 
+Note: 
+- `run_RawImporter.py` has optimized parameters, the bridged channels groups are only candidates but if results are weird, feel free to change the default parameters
 ---
 
-## Preprocessing (standalone)
+## 3. Preprocessing (standalone)
 
 ```bash
 python eeg_tools/run_Preprocessing.py \
