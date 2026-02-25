@@ -66,6 +66,23 @@ and include:
 
 ---
 
+## Importing (standalone)
+```bash
+python eeg_tools/run_RawImporter.py \
+  --file-path /path/to/recording.dat \
+  --helper-dir eeg_tools/helper \
+  --keep-stim \
+  --verbose
+```
+
+Key parameters:
+- `--keep-stim`: allows to keep stim channels attached to the mne.io.Raw object
+
+Note: 
+- `run_RawImporter.py` is a tool that is used by other tools; by itself it is not very useful other than printing some information to the monitor
+  
+---
+
 ## Bridged-channel QC (standalone)
 
 Run the bridging checker directly:
