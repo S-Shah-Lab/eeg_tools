@@ -42,20 +42,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     src.add_argument(
         "--file-path",
         help="Full path to the input .dat file",
-    )
-    src.add_argument(
-        "--file-name",
-        help=(
-            "Filename of the input .dat file (used with --root). "
-            "Example: sub-XXX_ses-01_task-MotorImag_run-01.dat"
-        ),
-    )
-
-    parser.add_argument(
-        "--root",
-        required=True, 
-        help="Root folder used with --file-name and as default output root",
-    )
+    ) 
     parser.add_argument(
         "--helper-dir",
         default="./helper",
@@ -63,23 +50,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--save-path",
-        default=None,
-        help=(
-            "Output folder for plots and the PDF. If omitted, defaults to "
-            "<root>/<base_name_without_ext>"
-        ),
-    )
-
-    # Import
-    parser.add_argument(
-        "--keep-stim",
-        action="store_true",
-        help="Keep stimulus/state channels when importing",
-    )
-    parser.add_argument(
-        "--import-verbose",
-        action="store_true",
-        help="Verbose output during import",
+        required=True,
+        help= "Output folder for plots and the PDF",
     )
 
     # Bridging checker
@@ -109,7 +81,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     # Preprocessing parameters
     parser.add_argument("--notch-freqs",         type=float, default=60.0,  help="Notch frequency (Hz)")
     parser.add_argument("--bandpass-lfreq",      type=float, default=1.0,   help="Band-pass low cutoff (Hz)")
-    parser.add_argument("--bandpass-hfreq",      type=float, default=100.0, help="Band-pass high cutoff (Hz)")
+    parser.add_argument("--bandpass-hfreq",      type=float, default=40.0, help="Band-pass high cutoff (Hz)")
     parser.add_argument("--prep-random-state",   type=int, default=83092,   help="Random seed for PREP")
     parser.add_argument("--prep-no-correlation", action="store_true",       help="Disable PREP correlation criterion")
     parser.add_argument("--prep-no-deviation",   action="store_true",       help="Disable PREP deviation criterion")
@@ -157,21 +129,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--age-at-test", default="N/A",        help="Age at test (string, used in the PDF header)")
 
     return parser
-
-
-def _resolve_file_path(args: argparse.Namespace) -> str:
-    """Resolve the input file path from CLI args"""
-    if args.file_path:
-        return args.file_path
-    return os.path.join(args.root, args.file_name)
-
-
-def _default_save_path(root: str, file_path: str) -> str:
-    """Default output folder: <root>/<base_name_without_ext>"""
-    file_name = os.path.basename(file_path)
-    base_name, _ = os.path.splitext(file_name)
-    return os.path.join(root, base_name)
-
 
 def _build_preproc_config(args: argparse.Namespace) -> EEGPreprocessorConfig:
     """Create an EEGPreprocessorConfig from CLI args"""
@@ -232,18 +189,17 @@ def main(argv: list[str] | None = None) -> None:
     parser = build_arg_parser()
     args = parser.parse_args(argv)
 
-    file_path = _resolve_file_path(args)
-    save_path = args.save_path or _default_save_path(args.root, file_path)
-    _ensure_dir(Path(save_path))
+    _ensure_dir(Path(args.save_path))
 
     # ------------------------------------------------------------------
     # Import
     # ------------------------------------------------------------------
+    print(['--- Running EEGRawImporter ---'])
     imp = EEGRawImporter(
-        path_to_file=file_path,
+        path_to_file=args.file_path,
         helper_dir=args.helper_dir,
-        keep_stim=args.keep_stim,
-        verbose=args.import_verbose,
+        keep_stim=True,
+        verbose=True,
     )
 
     raw = imp.raw
@@ -251,10 +207,15 @@ def main(argv: list[str] | None = None) -> None:
     montage_type = args.montage_type or imp.montage.get("montage_type")
     date_test = imp.stream.get("date_test")
 
+    file_name = args.file_path.split('/')[-1].split('.')[0]
+    save_path = os.path.join(args.save_path, file_name)
+    print(save_path)
+
     # ------------------------------------------------------------------
     # Bridging checker
     # ------------------------------------------------------------------
     if not args.skip_bridging:
+        print(['--- Running BridgingChecker ---'])
         BridgingChecker(
             raw=raw,
             verbose=args.bridge_verbose,
@@ -274,6 +235,7 @@ def main(argv: list[str] | None = None) -> None:
     # ------------------------------------------------------------------
     if not args.skip_preprocessing:
         config = _build_preproc_config(args)
+        print(['--- Running EEGPreprocessor ---'])
         preproc = EEGPreprocessor(
             raw,
             ch_set,
@@ -289,6 +251,7 @@ def main(argv: list[str] | None = None) -> None:
     # Motor imagery analysis
     # ------------------------------------------------------------------
     if not args.skip_analysis:
+        print(['--- Running EEGMotorImagery ---'])
         EEGMotorImagery(
             raw,
             ch_set,
@@ -308,6 +271,7 @@ def main(argv: list[str] | None = None) -> None:
     # PDF report
     # ------------------------------------------------------------------
     if not args.skip_report:
+        print(['--- Running MotorImageryPdfReport ---'])
         MotorImageryPdfReport(
             plot_folder=save_path,
             helper_folder=args.helper_dir,
@@ -319,7 +283,7 @@ def main(argv: list[str] | None = None) -> None:
         )
 
     print("Pipeline complete")
-    print("Input:", file_path)
+    print("Input:", args.file_path)
     print("Output folder:", save_path)
 
 
