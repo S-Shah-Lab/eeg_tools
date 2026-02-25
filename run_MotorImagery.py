@@ -53,7 +53,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     parser.add_argument(
         "--root",
-        default="/mnt/c/Users/scana/Desktop/motorimagery_to_run",
+        required=True, 
         help="Root folder used with --file-name and as default output root",
     )
     parser.add_argument(
@@ -92,7 +92,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--bridge-score-threshold",
         type=float,
         default=0.095,
-        help="Threshold on correlation × affinity bridge score",
+        help="Threshold on correlation x affinity bridge score",
     )
     parser.add_argument("--bridge-verbose", action="store_true", help="Verbose bridging output")
 
@@ -325,134 +325,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-
-    '''
-    To run in VSCode Interactive Window 
-    def _ensure_dir(p: Path) -> None:
-        """
-        Create folder and parents if they do not exist
-        If parents is True, any missing parents of this path are created as needed
-        If exist_ok is False, FileExistsError is raised if the target directory already exists
-        """
-        p.mkdir(parents=True, exist_ok=True)
-
-    helper_dir = "./helper"
-    root       = "/mnt/c/Users/scana/Desktop/motorimagery_to_run"
-    #file_path = os.path.join(root, "sub-PDHC002_ses-01_task-MotorImag_run-01.dat")     # EGI128
-    #file_path = os.path.join(root, "sub-PDHC002_ses-01_task-MotorImag_run-02.dat")     # EGI128
-    file_path = os.path.join(root, "sub-PDHC034_ses-01_task-MotorImag_run-01.dat")     # EGI64
-    #file_path = os.path.join(root, "sub-DOCpeds003_ses-01_task-MotorImag_run-01.dat")  # EGI128
-    #file_path = os.path.join(root, "sub-PDNG025_ses-01_task-HillOddBall_run-04.dat")   # GTEC32
-
-
-    file_name = file_path.split('/')[-1]
-    base_name, extension = os.path.splitext(file_name)
-    sub_name = base_name.split("sub-")[1].split("_ses")[0]
-    ses_name = base_name.split("ses-")[1].split("_")[0]
-
-
-    save_path = os.path.join(root, base_name)
-    _ensure_dir(Path(save_path))
-
-
-    imp = EEGRawImporter(
-        path_to_file = file_path,
-        helper_dir   = helper_dir,
-        keep_stim    = True,
-        verbose      = False,
-    )
-    raw          = imp.raw
-    ch_set       = imp.ch_set
-    montage_type = imp.montage['montage_type']
-    date_test    = imp.stream['date_test']
-
-
-    bc = BridgingChecker(
-            raw                    = raw,
-            verbose                = False,
-            fmin                   = 1.0,
-            fmax                   = 40.0,
-            sigma                  = 0.05,
-            window_sec             = 10.0,
-            bridge_score_threshold = 0.095,
-            show_extra             = False,
-            figure                 = None,      
-            axes                   = None, 
-            save_path              = save_path,
-    )
-
-
-
-    config = EEGPreprocessorConfig([
-        # Execution order is the order listed here
-
-        ("notch", {
-            "freqs": 60,
-            "kwargs": {},
-        }),
-
-        ("bandpass", {
-            "l_freq": 1,
-            "h_freq": 100,
-            "kwargs": {},
-        }),
-
-        ("prep", {
-            "random_state": 83092,
-            "correlation": True,
-            "deviation"  : True,
-            "hf_noise"   : True,
-            "nan_flat"   : True,
-            "ransac"     : True,
-        }),
-
-        ("annotation", {
-            "plot": True,
-        }),
-        
-        ("interpolation", {
-            "reset_bads_after_interp": True,
-        }),
-
-        ("rereference", {
-            "channels": "tp9 tp10",
-        }),
-
-        ("spatialfilter", {
-            "exclude": None,
-        }),
-    ])
-
-    preproc = EEGPreprocessor(raw, ch_set, config=config, copy=True, montage_type=montage_type, verbose=False)
-    preproc.run()
-    raw     = preproc.raw
-    history = preproc.history
-    ch_set  = preproc.ch_set
-
-    resolution = 1
-
-    mi = EEGMotorImagery(
-        raw,
-        ch_set,
-        nEpochs=6, 
-        duration_task=10., 
-        skip=1., 
-        resolution=resolution,
-        freq_bands=[4.0, 8.0, 13.0, 31.0],
-        nSim=2999,
-        copy=True,
-        verbose=False,
-        save_path=save_path,
-    )
-
-
-    pdf = MotorImageryPdfReport(
-            plot_folder=save_path,
-            helper_folder=helper_dir,
-            date_test=date_test,
-            montage_name=montage_type,
-            resolution=resolution,
-            age_at_test="20",
-            save_folder=save_path,
-    )
-    '''

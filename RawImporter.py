@@ -184,7 +184,7 @@ class EEGRawImporter:
             ch_names=[x for x in states.keys()], sfreq=fs_stim, ch_types="stim"
         )
         stim = mne.io.RawArray(
-            [x[0] for x in states.values()], info_stim, first_samp=0, verbose=False
+            np.array([x[0] for x in states.values()])[:, 0, :], info_stim, first_samp=0, verbose=False
         )
         self.raw.add_channels([stim])
         
