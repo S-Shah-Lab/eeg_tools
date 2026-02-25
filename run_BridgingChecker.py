@@ -1,5 +1,5 @@
 from __future__ import annotations
-import argparse
+import argparse, os
 from RawImporter import EEGRawImporter
 from BridgingChecker import BridgingChecker
 
@@ -20,16 +20,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--helper-dir",
         default="./helper",
         help="Folder containing helper montage files",
-    )
-    parser.add_argument(
-        "--keep-stim",
-        action="store_true",
-        help="Keep stimulus/state channels when importing",
-    )
-    parser.add_argument(
-        "--import-verbose",
-        action="store_true",
-        help="Verbose output during import",
     )
 
     # BridgingChecker parameters
@@ -55,8 +45,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--save-path",
-        default=None,
-        help="Optional folder to save bridging plots into",
+        required=True,
+        help="Folder to save bridging plots into",
     )
     parser.add_argument(
         "--verbose",
@@ -79,6 +69,8 @@ def main(argv: list[str] | None = None) -> None:
         verbose=args.import_verbose,
     )
 
+    file_name = args.file_path.split('/')[-1].split('.')[0]
+
     BridgingChecker(
         raw=imp.raw,
         verbose=args.verbose,
@@ -90,7 +82,7 @@ def main(argv: list[str] | None = None) -> None:
         show_extra=args.show_extra,
         figure=None,
         axes=None,
-        save_path=args.save_path,
+        save_path=os.path.join(args.save_path, file_name),
     )
 
     print("Bridging analysis complete")

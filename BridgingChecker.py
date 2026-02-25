@@ -534,7 +534,16 @@ class BridgingChecker:
             )
             
             if self.save_path is not None:
-                self.bridging_checker_fig.savefig(os.path.join(self.save_path, "bridged_candidates.png"), bbox_inches="tight")
-                self.bridging_checker_fig.savefig(os.path.join(self.save_path, "bridged_candidates.svg"), bbox_inches="tight")
+                # Ensure the save directory exists (create it if it doesn't)
+                os.makedirs(self.save_path, exist_ok=True)
+
+                self.bridging_checker_fig.savefig(
+                    os.path.join(self.save_path, f"bridged_candidates.png"),
+                    bbox_inches="tight",
+                )
+                self.bridging_checker_fig.savefig(
+                    os.path.join(self.save_path, f"bridged_candidates.svg"),
+                    bbox_inches="tight",
+                )
                 
         return self.groups
