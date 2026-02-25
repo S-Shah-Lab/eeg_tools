@@ -67,66 +67,65 @@ and include:
 ---
 
 ## 1. Importing (standalone)
-```bash
-python eeg_tools/run_RawImporter.py \
-  --file-path /path/to/recording.dat \
-  --helper-dir eeg_tools/helper \
-  --keep-stim \
-  --verbose
-```
+  ```bash
+  python eeg_tools/run_RawImporter.py \
+    --file-path /path/to/recording.dat \
+    --helper-dir eeg_tools/helper \
+    --keep-stim \
+    --verbose
+  ```
 
-Key parameters:
-- `--keep-stim`: allows to keep stim channels attached to the mne.io.Raw object
+  Key parameters:
+  - `--keep-stim`: allows to keep stim channels attached to the mne.io.Raw object
 
-Note: 
-- `run_RawImporter.py` is a tool that is used by other tools; by itself it is not very useful other than printing some information to the monitor
+  Note: 
+  - `run_RawImporter.py` is a tool that is used by other tools; by itself it is not very useful other than printing some information to the monitor
   
 ---
 
 ## 2. Bridged-channel QC (standalone)
 
-Run the bridging checker directly:
-```bash
-python eeg_tools/run_BridgingChecker.py \
-  --file-path /path/to/recording.dat \
-  --helper-dir ./helper  \
-  --show-extra \
-  --save-path /path/to/output_folder \
-  --verbose
-```
+  Run the bridging checker directly:
+  ```bash
+  python eeg_tools/run_BridgingChecker.py \
+    --file-path /path/to/recording.dat \
+    --helper-dir ./helper  \
+    --show-extra \
+    --save-path /path/to/output_folder \
+    --verbose
+  ```
 
-Key parameters:
-- `--fmin`, `--fmax`: Band-pass filter; default = 1.0, 40.0
-- `--sigma`: Gaussian kernel width for affinity; default = 0.05 (don't change)
-- `--window-sec`: Sliding window length (non-overlapping); default = 10.0 
-- `--bridge-score-threshold`: Threshold on *(correlation × affinity)*; default = 0.095 (don't change)
-- `--show-extra`: Optional, will show plots but still generate output image of bridged candidates
+  Key parameters:
+  - `--fmin`, `--fmax`: Band-pass filter; default = 1.0, 40.0
+  - `--sigma`: Gaussian kernel width for affinity; default = 0.05 (don't change)
+  - `--window-sec`: Sliding window length (non-overlapping); default = 10.0 
+  - `--bridge-score-threshold`: Threshold on *(correlation × affinity)*; default = 0.095 (don't change)
+  - `--show-extra`: Optional, will show plots but still generate output image of bridged candidates
 
-Note: 
-- `run_RawImporter.py` has optimized parameters, the bridged channels groups are only candidates but if results are weird, feel free to change the default parameters
----
+  Note: 
+  - `run_BridgingChecker.py` has optimized parameters, the bridged channel groups are only candidates, but if the results are weird, feel free to change the default parameters
+  ---
 
 ## 3. Preprocessing (standalone)
-
-```bash
-python eeg_tools/run_Preprocessing.py \
-  --file-path /path/to/recording.dat \
-  --helper-dir eeg_tools/helper
-```
-
-You can disable steps:
-- `--no-notch`
-- `--no-bandpass`
-- `--no-prep`
-- `--no-annotation`
-- `--no-interpolation`
-- `--no-rereference`
-- `--no-spatialfilter`
-
-...and control parameters like:
-- `--notch-freqs` (default 60)
-- `--bandpass-lfreq`, `--bandpass-hfreq`
-- PREP toggles: `--prep-no-correlation`, `--prep-no-deviation`, etc.
+  ```bash
+  python eeg_tools/run_Preprocessing.py \
+    --file-path /path/to/recording.dat \
+    --helper-dir eeg_tools/helper
+  ```
+  
+  You can disable steps:
+  - `--no-notch`
+  - `--no-bandpass`
+  - `--no-prep`
+  - `--no-annotation`
+  - `--no-interpolation`
+  - `--no-rereference`
+  - `--no-spatialfilter`
+  
+  ...and control parameters like:
+  - `--notch-freqs` (default 60)
+  - `--bandpass-lfreq`, `--bandpass-hfreq`
+  - PREP toggles: `--prep-no-correlation`, `--prep-no-deviation`, etc.
 
 ---
 
