@@ -119,11 +119,6 @@ Quickstart: full pipeline (recommended)
 ### Minimal run (provide the `.dat` file path)
 ```bash
 python eeg_tools/run_MotorImagery.py \
-  --file-path /path/to/sub-XXX_ses-01_task-MotorImag_run-01.dat \
-  --helper-dir eeg_tools/helper
-  --save-path ./outputs
-
-python eeg_tools/run_MotorImagery.py \
   --file-path /path/to/file.dat \
   --helper-dir ./helper \
   --save-path /path/to/output_folder \
