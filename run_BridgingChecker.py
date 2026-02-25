@@ -100,34 +100,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
-
-    '''
-    To run in VSCode Interactive Window 
-    #file_path = "/mnt/c/Users/scana/Desktop/motorimagery_to_run/sub-PDHC034_ses-01_task-MotorImag_run-01.dat"     # EGI64
-    #file_path = "/mnt/c/Users/scana/Desktop/motorimagery_to_run/sub-DOCpeds003_ses-01_task-MotorImag_run-01.dat"  # EGI128
-    #file_path = "/mnt/c/Users/scana/Desktop/motorimagery_to_run/sub-PDNG025_ses-01_task-HillOddBall_run-04.dat"  # GTEC32
-    #helper_dir = "/mnt/c/Users/scana/Dropbox/WCornell/develop/eeg_tools/helper"
-
-    imp = EEGRawImporter(
-        path_to_file = file_path,
-        helper_dir   = helper_dir,
-        keep_stim    = False,
-        verbose      = False,
-    )
-
-    raw    = imp.raw
-
-    bc = BridgingChecker(
-            raw=raw,
-            verbose=False,
-            fmin=1.0,
-            fmax=40.0,
-            sigma=0.05,
-            window_sec=10.0,
-            bridge_score_threshold=0.095,
-            show_extra=False,
-            figure=None,      
-            axes=None, 
-            save_path=None,
-    )
-    '''
