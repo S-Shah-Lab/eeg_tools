@@ -198,7 +198,7 @@ def main(argv: list[str] | None = None) -> None:
     imp = EEGRawImporter(
         path_to_file=args.file_path,
         helper_dir=args.helper_dir,
-        keep_stim=True,
+        keep_stim=True, # don't change
         verbose=True,
     )
 

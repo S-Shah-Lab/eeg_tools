@@ -122,7 +122,64 @@ python eeg_tools/run_MotorImagery.py \
   --file-path /path/to/sub-XXX_ses-01_task-MotorImag_run-01.dat \
   --helper-dir eeg_tools/helper
   --save-path ./outputs
+
+python eeg_tools/run_MotorImagery.py \
+  --file-path /path/to/file.dat \
+  --helper-dir ./helper \
+  --save-path /path/to/output_folder \
+  --age-at-test AGE_OF_SUBJECT
 ```
+
+  Key parameters:
+    - `--file-path`:  Path to motor imagery .dat file
+    - `--helper-dir`: Path to helper directory
+    - `--save-path`:  Path to directory for output save
+    
+    - `--skip-bridging`:                Skip bridging analysis
+    - `--bridge-fmin`, `--bridge-fmax`: Band-pass filter; default = 1.0, 40.0
+    - `--bridge-sigma`:                 Gaussian kernel width for affinity; default = 0.05 (don't change)
+    - `--bridge-window-sec`:            Sliding window length (non-overlapping); default = 10.0 
+    - `--bridge-score-threshold`:       Threshold on *(correlation × affinity)*; default = 0.095 (don't change)
+    - `--bridge-verbose`:               Verbose output during bridging analysis
+    
+    - `--skip-preprocessing`: Skip preprocessing pipeline
+    - `--no-notch`:           Disable notch filter step
+        - `--notch-freqs`: Notch filter frequencies and multiples; default = 60
+
+    - `--no-bandpass`: Disable band-pass filter step
+        - `--bandpass-lfreq`, `--bandpass-hfreq`: Band pass filter; default = 1.0, 40.0
+
+    - `--no-prep`:          Disable PREP noisy-channel detection step
+        - `--prep-no-correlation`: Disable PREP correlation criterion
+        - `--prep-no-deviation`:   Disable PREP deviation criterion
+        - `--prep-no-hf-noise`:    Disable PREP HF-noise criterion
+        - `--prep-no-nan-flat`:    Disable PREP NaN/flat criterion
+        - `--prep-no-ransac`:      Disable PREP RANSAC criterion
+        - `--prep-random-state:    Seed for RANSAC
+        - `--preproc-verbose`: Verbose preprocessing output
+
+    - `--no-annotation`:    Disable manual BAD-region annotation step
+
+    - `--no-interpolation`: Disable bad-channel interpolation step
+        - `--reset-bads-after-interp`: Reset raw.info['bads'] after interpolation
+
+    - `--no-rereference`:   Disable re-referencing step
+        - `--reref-channels`: Channels used for re-referencing, e.g. "tp9 tp10"
+
+    - `--no-spatialfilter`: Disable spatial filtering step, otherwise SLAP is applied
+    
+    - `--skip-analysis`:    Skip Motor Imagery analysis
+    - `--n-epochs`:         Number of epochs per trial
+    - `--duration-task`:    Task duration (s)
+    - `--skip`:             Seconds to skip at start of each segment
+    - `--resolution`:       PSD frequency resolution (Hz/bin)
+    - `--freq-bands`:       Comma-separated band edges, e.g. 4,8,13,31
+    - `--n-sim`:            Number of simulations for stats tests
+    - `--strict`:           Use strict motor imagery channel set (else more channels are used)
+    - `--analysis-verbose`: Verbose motor imagery analysis output
+    
+    - `--skip-report`: Skip PDF report generation
+    - `--age-at-test`: Age at test (string, used in the PDF header), otherwise N/A will show
 
 ### Output
 - plots from bridging / preprocessing / analysis
