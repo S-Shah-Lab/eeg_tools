@@ -42,6 +42,7 @@ class EEGMotorImagery:
         copy: bool = True,
         verbose: bool = False,
         save_path: str = None,
+        export_csv: bool = True,
     ) -> None:
 
         # Work on a copy if requested
@@ -59,6 +60,7 @@ class EEGMotorImagery:
         self.strict        = strict
         self.verbose       = verbose
         self.save_path     = save_path
+        self.export_csv    = export_csv
         
         if self.strict: 
             self.ch_motor_imagery = [
@@ -81,6 +83,12 @@ class EEGMotorImagery:
         self._grab_left_right_electrodes()
         
         self._run_stat_tests()
+        
+        # Export CSV files
+        if self.save_path is not None and self.export_csv:
+            self._export_psd_csv()
+            self._export_r2_csv()
+            self._export_bootstrap_csv()
         
         # Plot distributions for a single comparison
         # fig, axs = self._plot_test_distributions("left_vs_left_rest", transf="r2")
@@ -984,7 +992,8 @@ class EEGMotorImagery:
         if observed is not None:
             ax.axvline(float(observed), color="black", label=f"Obs: {float(observed):.3f}")
         if null_val is not None:
-            ax.axvline(float(null_val), color="red", label=f"$H_0$: $\Delta$ = {float(null_val):.1f}")
+            #ax.axvline(float(null_val), color="red", label=f"$H_0$: $\Delta$ = {float(null_val):.1f}")
+            ax.axvline(float(null_val), color="red", label=fr"$H_0$: $\Delta$ = {float(null_val):.1f}")
 
         ax.set_xlabel(xlabel, loc="right")
 
@@ -2260,6 +2269,185 @@ class EEGMotorImagery:
         chs = [c.lower() for c in self.raw.info["ch_names"]]
         name_set = set([n.lower() for n in names_lower])
         return [i for i, c in enumerate(chs) if c in name_set]
+
+    def _export_psd_csv(self) -> None:
+        """
+        Export the mean PSD (averaged across all trial batches) per channel per
+        frequency bin for motor imagery channels of interest.
+
+        Output file: <save_path>/psd_mean_per_channel_per_bin.csv
+        Layout:
+            rows    — one per motor imagery channel found in the recording
+            columns — 'channel', then one column per frequency bin labelled
+                      as the bin centre in Hz (e.g. '1.0', '2.0', ...)
+            values  — raw Welch power (same units as MNE compute_psd output,
+                      typically V²/Hz)
+        """
+        import csv as _csv
+
+        if not hasattr(self, "psds_dict") or not self.psds_dict:
+            print("[CSV] No PSD data available. Skipping PSD CSV export.")
+            return
+
+        # ── Channel mapping ────────────────────────────────────────────────
+        # ch_set.get_labels() is ordered identically to the second (channel)
+        # dimension of every psds_dict value array.
+        all_labels    = [lbl.lower() for lbl in self.ch_set.get_labels()]
+        mi_labels_set = {ch.lower() for ch in self.ch_motor_imagery}
+
+        mi_indices = [i for i, lbl in enumerate(all_labels) if lbl in mi_labels_set]
+        mi_names   = [all_labels[i] for i in mi_indices]
+
+        if not mi_indices:
+            print("[CSV] No motor imagery channels found in channel set. "
+                  "Skipping PSD CSV export.")
+            return
+
+        # ── Frequency axis ─────────────────────────────────────────────────
+        fs   = float(self.raw.info["sfreq"])
+        fmin = float(self.raw.info.get("highpass", 0.0) or 0.0)
+        fmax = float(self.raw.info.get("lowpass", fs / 2.0) or (fs / 2.0))
+
+        # ── Average PSD across all batches ─────────────────────────────────
+        # Each psds_dict value has shape (n_ch, n_bins)
+        all_psds = np.stack(list(self.psds_dict.values()), axis=0)  # (n_batches, ch, bins)
+        mean_psd  = np.mean(all_psds, axis=0)                        # (ch, bins)
+
+        n_bins = mean_psd.shape[1]
+        freqs  = np.arange(fmin, fmax + self.resolution, self.resolution)
+        if freqs.size > n_bins:
+            freqs = freqs[:n_bins]
+        elif freqs.size < n_bins:
+            freqs = np.linspace(fmin, fmax, n_bins)
+
+        mi_psd = mean_psd[mi_indices, :]  # (n_mi_ch, bins)
+
+        # ── Write CSV ──────────────────────────────────────────────────────
+        fname = os.path.join(self.save_path, "psd_mean_per_channel_per_bin.csv")
+        with open(fname, "w", newline="") as fh:
+            writer = _csv.writer(fh)
+            writer.writerow(["channel"] + [f"{f:.4g}" for f in freqs])
+            for ch_name, psd_row in zip(mi_names, mi_psd):
+                writer.writerow([ch_name] + [f"{v:.6e}" for v in psd_row])
+
+        print(f"[CSV] PSD mean per channel per bin saved → {fname}")
+
+    def _export_r2_csv(self) -> None:
+        """
+        Export signed r² per frequency band per channel for motor imagery
+        channels of interest.
+
+        Output file: <save_path>/signed_r2_per_band_per_channel.csv
+        Layout:
+            rows    — one per (comparison × frequency band) combination,
+                      e.g. ('left_vs_left_rest', '4-7Hz')
+            columns — 'comparison', 'band', then one column per motor
+                      imagery channel found in the recording
+            values  — signed r² (negative = power suppression during task,
+                      positive = power increase during task)
+        """
+        import csv as _csv
+
+        if not hasattr(self, "stats_results") or not self.stats_results:
+            print("[CSV] No stats results available. Skipping r² CSV export.")
+            return
+
+        # ── Channel mapping ────────────────────────────────────────────────
+        all_labels    = [lbl.lower() for lbl in self.ch_set.get_labels()]
+        mi_labels_set = {ch.lower() for ch in self.ch_motor_imagery}
+
+        mi_indices = [i for i, lbl in enumerate(all_labels) if lbl in mi_labels_set]
+        mi_names   = [all_labels[i] for i in mi_indices]
+
+        if not mi_indices:
+            print("[CSV] No motor imagery channels found. Skipping r² CSV export.")
+            return
+
+        # ── Write CSV ──────────────────────────────────────────────────────
+        fname = os.path.join(self.save_path, "signed_r2_per_band_per_channel.csv")
+        with open(fname, "w", newline="") as fh:
+            writer = _csv.writer(fh)
+            writer.writerow(["comparison", "band"] + mi_names)
+            for comp_name, comp_res in self.stats_results.items():
+                band_results = comp_res.get("band_results", {})
+                for band_key, bres in band_results.items():
+                    effect     = np.asarray(bres["effect_per_channel"])  # (n_ch,)
+                    mi_effects = effect[mi_indices]
+                    writer.writerow(
+                        [comp_name, band_key] + [f"{v:.6f}" for v in mi_effects]
+                    )
+
+        print(f"[CSV] Signed r² per band per channel saved → {fname}")
+
+    def _export_bootstrap_csv(self, ci: float = 95.0) -> None:
+        """
+        Export bootstrap statistics per frequency band and comparison to a CSV file.
+
+        The bootstrap resamples trials with replacement *within* each group, so
+        the resulting distribution characterises the sampling variability of the
+        observed test statistic (difference of sums of signed r²,
+        contralateral minus ipsilateral).  The confidence interval reported
+        here is therefore a bootstrap CI on that effect estimate.
+
+        Output file: <save_path>/bootstrap_stats_per_band.csv
+        Columns:
+            comparison   — e.g. 'left_vs_left_rest'
+            band         — e.g. '4-7Hz'
+            observed     — observed test statistic (ipsi − contra Σ signed-r²)
+            boot_mean    — mean of the bootstrap distribution
+            ci_low       — lower percentile of the bootstrap distribution
+            ci_high      — upper percentile of the bootstrap distribution
+            ci_level     — confidence level used (e.g. 95.0)
+            p_value      — one-sided bootstrap p-value (H₀: effect ≤ 0)
+            p_ci_low     — lower bound of the Monte-Carlo p-value interval
+            p_ci_high    — upper bound of the Monte-Carlo p-value interval
+            n_simulations — number of bootstrap resamples
+        """
+        import csv as _csv
+
+        if not hasattr(self, "stats_results") or not self.stats_results:
+            print("[CSV] No stats results available. Skipping bootstrap CSV export.")
+            return
+
+        alpha_lo = (100.0 - ci) / 2.0
+        alpha_hi = 100.0 - alpha_lo
+
+        fname = os.path.join(self.save_path, "bootstrap_stats_per_band.csv")
+        with open(fname, "w", newline="") as fh:
+            writer = _csv.writer(fh)
+            writer.writerow([
+                "comparison", "band",
+                "observed",
+                "boot_mean", "ci_low", "ci_high", "ci_level",
+                "p_value", "p_ci_low", "p_ci_high",
+                "n_simulations",
+            ])
+            for comp_name, comp_res in self.stats_results.items():
+                band_results = comp_res.get("band_results", {})
+                for band_key, bres in band_results.items():
+                    boot = bres.get("bootstrap", {})
+                    dist = np.asarray(boot.get("null_distribution", []))
+                    observed  = boot.get("observed",      float("nan"))
+                    p_val     = boot.get("p",             float("nan"))
+                    p_ci      = boot.get("p_interval",    (float("nan"), float("nan")))
+                    n_sim     = boot.get("n_simulations", len(dist))
+
+                    if dist.size > 0:
+                        boot_mean = float(np.mean(dist))
+                        ci_low    = float(np.percentile(dist, alpha_lo))
+                        ci_high   = float(np.percentile(dist, alpha_hi))
+                    else:
+                        boot_mean = ci_low = ci_high = float("nan")
+
+                    writer.writerow([
+                        comp_name, band_key,
+                        f"{observed:.6f}",
+                        f"{boot_mean:.6f}", f"{ci_low:.6f}", f"{ci_high:.6f}", f"{ci:.1f}",
+                        f"{p_val:.6f}", f"{p_ci[0]:.6f}", f"{p_ci[1]:.6f}",
+                        n_sim,
+                    ])
+
+        print(f"[CSV] Bootstrap stats per band saved → {fname}")
 
     def _bandpower_envelope(
         self,
