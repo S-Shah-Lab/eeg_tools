@@ -10,7 +10,7 @@ A Python toolkit for **EEG motor imagery** pipelines built around **BCI2000 `.da
 - **`RawImporter.py`**: Loads BCI2000 `.dat` files into an `mne.io.Raw` object (plus montage/channel set metadata).
 - **`BridgingChecker.py`**: Unsupervised **bridged-channel candidate detection** using a *correlation × affinity* score derived from distance-based Gaussian affinity matrices.
 - **`Preprocessing.py`**: Configurable preprocessing pipeline (notch, band-pass, PREP noisy-channel detection, optional manual annotations, interpolation, re-reference, spatial filtering).
-- **`MotorImagery.py`**: Motor imagery analysis using **Welch PSD** computed over within-trial segments (time-by-epoch, frequency-by-band), with permutation/bootstrapped statistics and report-ready plots.
+- **`MotorImagery.py`**: Motor imagery analysis using **Welch PSD** computed over within-trial segments (time-by-epoch, frequency-by-band), with permutation/bootstrapped statistics, report-ready plots, and optional CSV data exports.
 - **`PdfReport.py`**: Assembles plots into a **PDF report**.
 
 ### CLI entry points
@@ -107,13 +107,21 @@ Stats are computed with:
 - Permutation testing
 - Bootstrap testing for robustness / uncertainty reporting
 
+Three CSV files are exported automatically alongside plots (disable with `--skip-csv`):
+
+| File | Contents |
+|---|---|
+| `psd_mean_per_channel_per_bin.csv` | Mean Welch PSD (V²/Hz) averaged across all trial batches; rows = MI channels, columns = frequency bins (Hz) |
+| `signed_r2_per_band_per_channel.csv` | Signed r² effect size per frequency band per MI channel; rows = comparison × band, columns = MI channels |
+| `bootstrap_stats_per_band.csv` | Bootstrap CI (95%), mean, observed statistic, and p-value per comparison × band |
+
 Quickstart: full pipeline (recommended)
 
 `run_MotorImagery.py` runs:
 1) import (`.dat` → `mne.Raw`)
 2) (optional) bridging analysis
 3) (optional) preprocessing
-4) (optional) motor imagery analysis
+4) (optional) motor imagery analysis + CSV exports
 5) (optional) PDF report
 
 ### Minimal run (provide the `.dat` file path)
@@ -174,10 +182,12 @@ python eeg_tools/run_MotorImagery.py \
     - `--analysis-verbose`: Verbose motor imagery analysis output
     
     - `--skip-report`: Skip PDF report generation
+    - `--skip-csv`:    Skip CSV data export (PSD per bin, signed r² per band, bootstrap stats)
     - `--age-at-test`: Age at test (string, used in the PDF header), otherwise N/A will show
 
 ### Output
 - plots from bridging / preprocessing / analysis
+- CSV data exports (PSD per bin, signed r² per band, bootstrap stats per band)
 - a generated PDF report (if not skipped)
 
 ---
@@ -205,6 +215,11 @@ python eeg_tools/run_MotorImagery.py \
   --file-path /path/to/file.dat \
   --freq-bands 4,8,13,30,45 \
   --resolution 2.0
+```
+
+### Skip CSV data export
+```bash
+python eeg_tools/run_MotorImagery.py --file-path /path/to/file.dat --skip-csv
 ```
 
 ---
@@ -276,8 +291,17 @@ mi = EEGMotorImagery(
     copy=True,
     verbose=False,
     save_path="./outputs",
+    export_csv=True,   # writes three CSV files to save_path (set False to skip)
 )
 ```
+
+The three CSV files written to `save_path` when `export_csv=True`:
+
+| File | Contents |
+|---|---|
+| `psd_mean_per_channel_per_bin.csv` | Mean Welch PSD (V²/Hz) per MI channel per frequency bin |
+| `signed_r2_per_band_per_channel.csv` | Signed r² per frequency band per MI channel |
+| `bootstrap_stats_per_band.csv` | Bootstrap CI, mean, observed statistic, and p-value per band |
 
 ### 5. PDF report
 ```python
