@@ -6,10 +6,13 @@ Provides epoching, spectral feature computation, statistical testing, and report
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
-import re, os
+import csv
+import hashlib
+import json
+import os
+import re
 import numpy as np
 import mne
 from mne.io import BaseRaw
@@ -23,7 +26,6 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 from BCI2000Tools.Electrodes import ChannelSet
 
-from scipy.signal import hilbert
 
 
 class EEGMotorImagery:
@@ -37,12 +39,15 @@ class EEGMotorImagery:
         skip: float = 1., 
         resolution: float = 1.,
         freq_bands: List = [4.0, 8.0, 13.0, 31.0],
-        nSim: int = 2999,
+        nSim: int = 9999,
         strict: bool = False,
         copy: bool = True,
         verbose: bool = False,
         save_path: str = None,
         export_csv: bool = True,
+        auto_run: bool = True,
+        random_state: Optional[int] = 83092,
+        run_decoding: bool = True,
     ) -> None:
 
         # Work on a copy if requested
@@ -61,6 +66,15 @@ class EEGMotorImagery:
         self.verbose       = verbose
         self.save_path     = save_path
         self.export_csv    = export_csv
+        self.random_state  = random_state
+        self.run_decoding  = run_decoding
+        self._rng_master   = np.random.default_rng(random_state)
+        self.generated_figures: List[str] = []
+        self.exported_files: List[str] = []
+        self.analysis_warnings: List[str] = []
+        self.trial_quality_summary: List[Dict[str, Any]] = []
+        self.paradigm_event_summary: List[Dict[str, Any]] = []
+        self.parameter_summary: Dict[str, Any] = {}
         
         if self.strict: 
             self.ch_motor_imagery = [
@@ -77,86 +91,207 @@ class EEGMotorImagery:
                 "e86", "e53", "e79", "e54",
             ]
         
+        self._ensure_save_path()
+
+        if auto_run:
+            self.run()
+
+    def _info(self, message: str) -> None:
+        """Print an informational message when verbose output is enabled"""
+        if self.verbose:
+            print(f"[motor-imagery] {message}")
+
+    def _warn(self, message: str) -> None:
+        """Print a warning message"""
+        self.analysis_warnings.append(str(message))
+        print(f"[motor-imagery warning] {message}")
+
+    def _rng_for(self, label: str) -> np.random.Generator:
+        """Create a deterministic RNG for a named analysis component"""
+        base = 0 if self.random_state is None else int(self.random_state)
+        digest = hashlib.sha256(f"{base}:{label}".encode("utf-8")).hexdigest()[:16]
+        seed = int(digest, 16) % (2**32 - 1)
+        return np.random.default_rng(seed)
+
+    def _output_subdir(self, dirname: str) -> Optional[str]:
+        """Return an output subfolder path and create it when save_path is configured"""
+        if self.save_path is None:
+            return None
+        path = os.path.join(self.save_path, dirname)
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def _image_path(self, filename: str) -> Optional[str]:
+        """Return the path for a generated image inside <save_path>/images"""
+        folder = self._output_subdir("images")
+        if folder is None:
+            return None
+        return os.path.join(folder, filename)
+
+    def _csv_path(self, filename: str) -> Optional[str]:
+        """Return the path for a generated CSV inside <save_path>/csv"""
+        folder = self._output_subdir("csv")
+        if folder is None:
+            return None
+        return os.path.join(folder, filename)
+
+    def _savefig(self, fig: Figure, basename: str, formats: Tuple[str, ...] = ("png", "svg")) -> None:
+        """Save a figure in <save_path>/images and track it for metadata"""
+        if self.save_path is None:
+            return
+        for ext in formats:
+            path = self._image_path(f"{basename}.{ext}")
+            if path is None:
+                continue
+            fig.savefig(path, bbox_inches="tight")
+            self.generated_figures.append(path)
+
+    def _track_export(self, path: str) -> None:
+        """Track exported non-figure files for metadata"""
+        self.exported_files.append(path)
+
+    def _relative_output_path(self, path: str) -> str:
+        """Return a path relative to save_path when possible"""
+        if self.save_path is None:
+            return os.path.basename(path)
+        try:
+            return os.path.relpath(path, self.save_path)
+        except ValueError:
+            return os.path.basename(path)
+
+    def _ensure_save_path(self) -> None:
+        """Create the output folder and analysis subfolders when configured"""
+        if self.save_path is not None:
+            os.makedirs(self.save_path, exist_ok=True)
+            os.makedirs(os.path.join(self.save_path, "images"), exist_ok=True)
+            if self.export_csv:
+                os.makedirs(os.path.join(self.save_path, "csv"), exist_ok=True)
+
+    def run(self) -> None:
+        """Run the full motor imagery pipeline"""
+        self._info("Inferring paradigm annotations")
         self._evaluate_motorimagery_paradigm(swap=False)
+        self._build_parameter_summary()
+
+        self._info("Generating epochs")
         self._generate_epochs()
+        self._summarize_trial_quality()
+
+        self._info("Computing PSDs")
         self._generate_psds()
+
+        self._info("Finding left and right motor channels")
         self._grab_left_right_electrodes()
-        
-        self._run_stat_tests()
-        
-        # Export CSV files
+
+        self._info("Running lateralized statistics")
+        self._run_stat_tests(verbose=self.verbose)
+        self._apply_fdr_to_stats()
+        self._build_main_result_summary()
+
+        if self.run_decoding:
+            self._info("Running optional decoding analysis")
+            self._run_decoding_analysis()
+
         if self.save_path is not None and self.export_csv:
-            self._export_psd_csv()
-            self._export_r2_csv()
-            self._export_bootstrap_csv()
-        
-        # Plot distributions for a single comparison
-        # fig, axs = self._plot_test_distributions("left_vs_left_rest", transf="r2")
-        
-        # Plot both left and right distributions
-        plots = self._plot_all_test_distributions(transf="r2")
-        
-        # Plot topomaps left vs right across bands
-        fig, axs = self._plot_lateralized_topomaps()
-        
-        # Plot log-pvalues 
-        (mi_left, ax_left), (mi_right, ax_right) = self._plot_band_pvalues_bootstrap_separate()
-        
-        # Plot PSDs per channel
-        if self.strict: 
-            chs_to_plot = ['fc3', 'fc4', 'c3', 'c4', 'cp3', 'cp4']
+            self._info("Exporting CSV summaries")
+            self._export_all_csv()
+
+        self._info("Generating report plots")
+        self._generate_report_plots()
+
+        if self.save_path is not None:
+            self._export_report_metadata_json()
+
+    def _generate_report_plots(self) -> None:
+        """Generate the plots used by the existing PDF report"""
+        self._plot_all_test_distributions(transf="r2")
+        self._plot_lateralized_topomaps()
+        self._plot_band_pvalues_bootstrap_separate()
+
+        if self.strict:
+            chs_to_plot = ["fc3", "fc4", "c3", "c4", "cp3", "cp4"]
         else:
-            chs_to_plot = ['fc3', 'fc4', 'c3', 'c4', 'p3',  'p4' ]
-        
+            chs_to_plot = ["fc3", "fc4", "c3", "c4", "p3", "p4"]
+
         for ch in chs_to_plot:
             try:
-                fig, (ax_psd, ax_r2) = self._plot_channel_psd(ch)
-            except:
-                pass
-            
+                self._plot_channel_psd(ch)
+            except Exception as exc:
+                self._warn(f"Could not create PSD plot for channel '{ch}': {exc}")
+
         self._plot_paradigm_timeline()
         self._plot_band_effect(ci=95)
-        
-        
-        
-        
-    
+
+        for task, rest in (("left", "left_rest"), ("right", "right_rest")):
+            for band in ((8.0, 13.0), (13.0, 31.0)):
+                try:
+                    self._plot_within_trial_bandpower_overlay_rois(task, rest, band=band)
+                except Exception as exc:
+                    self._warn(f"Could not create contra/ipsi ERD/ERS overlay for {task} {band}: {exc}")
+
+        try:
+            self._plot_decoding_summary()
+            self._plot_decoding_confusion_best()
+        except Exception as exc:
+            self._warn(f"Could not create decoding plots: {exc}")
+
     @staticmethod
-    def step_down_events(signal: np.ndarray, time: Optional[np.ndarray] = None, tol: float = 0.0) -> List[Tuple[int, int]]:
+    def step_down_events(signal: np.ndarray, time: Optional[np.ndarray] = None, tol: float = 0.0) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Identify downward step changes in a trigger-like signal and return onset/offset indices and durations"""
-        if time is None: time = np.arange(signal.size)
+        signal = np.asarray(signal)
+        if time is None:
+            time = np.arange(signal.size)
         else:
             time = np.asarray(time)
             if time.shape != signal.shape:
-                raise RuntimeError("`time` and `signal` must have the same shape.")
+                raise RuntimeError("`time` and `signal` must have the same shape")
 
         diff = np.diff(signal)
-        step_indices = np.where(diff < -tol)[0] + 1  # +1 to get index of new (lower) value
+        step_indices = np.where(diff < -tol)[0] + 1
         step_times = time[step_indices]
-        if step_times.size >= 2: durations = np.diff(step_times)
-        else: durations = np.array([], dtype=float)
 
-        # Discard it if before 2 seconds given the current paradigm
-        while step_times[0] < 2000:
+        if step_times.size == 0:
+            raise RuntimeError("No downward trigger steps found in PresentationDisplayed")
+
+        while step_times.size and step_times[0] < 2000:
             step_times = step_times[1:]
-            durations  = durations[1:]
 
-        # Grab the offset of instruction
-        onset  = step_times[0::2]
+        if step_times.size < 2:
+            raise RuntimeError("Not enough PresentationDisplayed trigger steps to infer onset/offset pairs")
+
+        if step_times.size % 2 != 0:
+            step_times = step_times[:-1]
+
+        durations = np.diff(step_times)
+        onset = step_times[0::2]
         offset = step_times[1::2]
         return onset, offset, durations
-    
+
     @staticmethod
-    def find_step_intervals(signal: np.ndarray, threshold: float = 0.) -> List[Tuple[int, int]]:
-        """Return onset and offset indices for contiguous intervals where the signal exceeds a threshold"""
+    def find_step_intervals(signal: np.ndarray, threshold: float = 0.) -> Tuple[np.ndarray, np.ndarray]:
+        """Return onset and offset indices for complete contiguous intervals where the signal exceeds a threshold"""
+        signal = np.asarray(signal)
         active = signal > threshold
         changes = np.diff(active.astype(int))
         onsets = np.where(changes == 1)[0] + 1
         offsets = np.where(changes == -1)[0] + 1
-        
-        # Discard it if before 2 seconds given the current paradigm
-        while onsets[0] < 2000: onsets = onsets[1:]        
-        
+
+        if active.size and active[0]:
+            onsets = np.insert(onsets, 0, 0)
+
+        # Do not invent a terminal offset when the trigger never returns to zero
+        # The caller uses offsets as task starts, so a fabricated final offset creates an event at the end of file
+        n_pairs = min(onsets.size, offsets.size)
+        onsets = onsets[:n_pairs]
+        offsets = offsets[:n_pairs]
+
+        keep = onsets >= 2000
+        onsets = onsets[keep]
+        offsets = offsets[keep]
+
+        if onsets.size == 0:
+            raise RuntimeError("No valid complete trigger intervals found")
+
         return onsets, offsets
 
     @staticmethod
@@ -243,21 +378,28 @@ class EEGMotorImagery:
     @staticmethod
     def bands_from_edges(band_edges: List[float]) -> List[Tuple[float, float]]:
         """
-        Convert band edge list to consecutive (low, high) bands
+        Convert band edge list to consecutive half-open bands
 
         Example:
-            [4, 8, 13, 31] -> [(4, 7), (8, 12), (13, 31)]
+            [4, 8, 13, 31] -> [(4, 8), (8, 13), (13, 31)]
+
+        Band selection later uses [low, high) except for the final band,
+        where the high edge is included. This avoids the fragile legacy y - 1 rule.
         """
         edges = list(map(float, band_edges))
         if len(edges) < 2:
-            raise ValueError("band_edges must contain at least two values.")
+            raise ValueError("band_edges must contain at least two values")
         if any(np.diff(edges) <= 0):
-            raise ValueError("band_edges must be strictly increasing.")
-        
-        edges = list(zip(edges[:-1], edges[1:]))
-        edges = [(x,y-1) for x,y in edges]
-        
-        return edges
+            raise ValueError("band_edges must be strictly increasing")
+        return list(zip(edges[:-1], edges[1:]))
+
+    @staticmethod
+    def _band_indices(freqs: np.ndarray, low_f: float, high_f: float, is_last: bool = False) -> np.ndarray:
+        """Return frequency-bin indices for a half-open band interval"""
+        freqs = np.asarray(freqs, dtype=float)
+        if is_last:
+            return np.where((freqs >= low_f) & (freqs <= high_f))[0]
+        return np.where((freqs >= low_f) & (freqs < high_f))[0]
 
     @staticmethod
     def band_key(low_f: float, high_f: float) -> str:
@@ -278,6 +420,95 @@ class EEGMotorImagery:
 
         return LinearSegmentedColormap.from_list("custom_cmap", colors)
      
+
+    def _build_parameter_summary(self) -> Dict[str, Any]:
+        """Store analysis parameters that should appear in exports and the PDF"""
+        self.parameter_summary = {
+            "n_epochs_per_trial": int(self.nEpochs),
+            "duration_task_sec": float(self.duration_task),
+            "skip_sec": float(self.skip),
+            "psd_resolution_hz": float(self.resolution),
+            "freq_bands_input": list(map(float, self.freq_bands)) if isinstance(self.freq_bands, list) else self.freq_bands,
+            "n_simulations": int(self.nSim),
+            "strict_channel_set": bool(self.strict),
+            "random_state": self.random_state,
+            "run_decoding": bool(self.run_decoding),
+            "sfreq": float(self.raw.info.get("sfreq", np.nan)),
+            "highpass": float(self.raw.info.get("highpass", np.nan) or 0.0),
+            "lowpass": float(self.raw.info.get("lowpass", np.nan) or 0.0),
+            "n_raw_channels": int(len(self.raw.info.get("ch_names", []))),
+            "n_raw_samples": int(getattr(self.raw, "n_times", 0)),
+        }
+        return self.parameter_summary
+
+    def _classify_event_codes(self, code: np.ndarray, swap: bool = False) -> List[str]:
+        """Map trigger codes to condition labels and validate sequence assumptions"""
+        descriptions: List[str] = []
+        unknown_codes: Dict[str, int] = {}
+
+        for c in np.asarray(code):
+            c_int = int(c) if np.isfinite(c) else -999
+            if c_int == 1:
+                descriptions.append("left")
+            elif c_int == 2:
+                descriptions.append("right")
+            elif c_int == 3:
+                descriptions.append("right_rest" if swap else "left_rest")
+            elif c_int == 4:
+                descriptions.append("left_rest" if swap else "right_rest")
+            else:
+                label = f"unknown_{c_int}"
+                unknown_codes[label] = unknown_codes.get(label, 0) + 1
+                descriptions.append(label)
+
+        # Some BCI2000 files encode both rest periods with code 3
+        # Only apply the legacy every-fourth correction when the sequence clearly supports it
+        if "right_rest" not in descriptions and len(descriptions) >= 4:
+            corrected = list(descriptions)
+            corrected_count = 0
+            for i, desc in enumerate(corrected):
+                if (i + 1) % 4 == 0 and desc == "left_rest":
+                    corrected[i] = "right_rest"
+                    corrected_count += 1
+            if corrected_count:
+                descriptions = corrected
+                self._info(
+                    "Applied legacy rest-code correction: every 4th left_rest was relabeled as right_rest"
+                )
+
+        counts: Dict[str, int] = {}
+        for desc in descriptions:
+            counts[desc] = counts.get(desc, 0) + 1
+
+        expected = ["left", "right", "left_rest", "right_rest"]
+        rows = []
+        for label in expected:
+            rows.append({
+                "label": label,
+                "count": int(counts.get(label, 0)),
+                "status": "ok" if counts.get(label, 0) > 0 else "missing",
+            })
+        for label, n in sorted(counts.items()):
+            if label not in expected:
+                rows.append({"label": label, "count": int(n), "status": "unexpected"})
+
+        sequence_complete_blocks = int(len(descriptions) // 4)
+        sequence_remainder = int(len(descriptions) % 4)
+        rows.append({
+            "label": "complete_4_event_blocks",
+            "count": sequence_complete_blocks,
+            "status": "ok" if sequence_remainder == 0 else f"remainder_{sequence_remainder}",
+        })
+        self.paradigm_event_summary = rows
+
+        missing = [r["label"] for r in rows if r.get("status") == "missing"]
+        if missing:
+            self._warn(f"Paradigm validation missing expected labels: {', '.join(missing)}")
+        if unknown_codes:
+            self._warn(f"Paradigm validation found unexpected trigger codes: {unknown_codes}")
+
+        return descriptions
+
     def _evaluate_motorimagery_paradigm(self, swap: bool = True) -> None:
         """Infer the motor imagery task/rest structure from trigger channels and annotate the Raw recording accordingly"""
         nEpochs       = self.nEpochs
@@ -291,8 +522,8 @@ class EEGMotorImagery:
 
         try:
             presentDisp = self.raw.get_data(picks='PresentationDisplayed').ravel()
-        except:
-            pass
+        except Exception as exc:
+            self._info(f"PresentationDisplayed channel unavailable, falling back to StimulusCode: {exc}")
         
         if presentDisp is not None:
             onset, offset, duration = self.step_down_events(presentDisp, time=None, tol=0.0)
@@ -317,10 +548,16 @@ class EEGMotorImagery:
         else:
             raise RuntimeError("Not able to determine paradigm")
         
-        # Force the rest after right hand to have code = 4
-        for i,c in enumerate(code):
-            if (i+1) % 4 == 0: code[i] = 4
-            
+        n_events = min(len(onset), len(duration), len(code))
+        if n_events == 0:
+            raise RuntimeError("No motor imagery events could be inferred from trigger channels")
+
+        onset = np.asarray(onset[:n_events])
+        duration = np.asarray(duration[:n_events])
+        code = np.asarray(code[:n_events])
+
+        description_main = self._classify_event_codes(code, swap=swap)
+
         # Grab existing annotations
         annot = self.raw.annotations
         # Bad regions annotations
@@ -332,21 +569,39 @@ class EEGMotorImagery:
         duration_    = []
         description_ = []
                      
-        for i,c in enumerate(code):
+        for i, desc in enumerate(description_main):
+            if desc.startswith("unknown_"):
+                continue
             onset_.append(onset[i])
             duration_.append(duration[i])
-            if   c == 1: description_.append( "left"  )
-            elif c == 2: description_.append( "right" )
-            elif c == 3: 
-                if swap: description_.append( "right_rest" )
-                else:    description_.append( "left_rest"  )
-            elif c == 4: 
-                if swap: description_.append( "left_rest"  )
-                else:    description_.append( "right_rest" )
+            description_.append(desc)
 
         # Skip the first `skip` seconds of each segment
         # Convert onset_ to seconds
-        onset_ = [ t / self.raw.info['sfreq'] + skip for t in onset_ ]    
+        sfreq = float(self.raw.info['sfreq'])
+        raw_end = float(self.raw.times[-1]) if self.raw.n_times > 0 else 0.0
+        onset_sec = [t / sfreq + skip for t in onset_]
+
+        valid_onset = []
+        valid_duration = []
+        valid_description = []
+        required_window = float(duration_task - skip)
+        sample_margin = 1.0 / sfreq
+
+        for onset_value, duration_value, desc in zip(onset_sec, duration_, description_):
+            if onset_value + required_window - sample_margin <= raw_end + 1e-12:
+                valid_onset.append(float(onset_value))
+                valid_duration.append(float(duration_value))
+                valid_description.append(desc)
+            else:
+                self._warn(
+                    f"Dropped incomplete terminal event '{desc}' at {onset_value:.3f}s: "
+                    f"requires {required_window:.3f}s but data end is {raw_end:.3f}s"
+                )
+
+        onset_ = valid_onset
+        duration_ = valid_duration
+        description_ = valid_description
         
         # Trial number annotations
         delta = (duration_task - skip) / nEpochs
@@ -359,9 +614,16 @@ class EEGMotorImagery:
         for i,t in enumerate(onset_):
             if description_[i] == 'left': k += 1
             for j in range(nEpochs):
-                onset_number.append( t + delta * j )
-                duration_number.append( delta )
-                description_number.append( f"{description_[i]}_{k}" )
+                epoch_onset = t + delta * j
+                if epoch_onset + delta - sample_margin > raw_end + 1e-12:
+                    self._warn(
+                        f"Skipped incomplete numbered epoch '{description_[i]}_{k}' "
+                        f"at {epoch_onset:.3f}s"
+                    )
+                    continue
+                onset_number.append(epoch_onset)
+                duration_number.append(delta)
+                description_number.append(f"{description_[i]}_{k}")
         
         onset_       = onset_bad       + onset_       + onset_number
         duration_    = duration_bad    + duration_    + duration_number
@@ -374,16 +636,25 @@ class EEGMotorImagery:
     def _make_epochs_batch(self, event_id: int) -> mne.Epochs:
         """Create fixed-length MNE Epochs for a single annotation event id using the configured task window"""
         
-        tmin = 0
-        tmax = (self.duration_task - self.skip) / self.nEpochs
+        tmin = 0.0
+        sfreq = float(self.raw.info["sfreq"])
+        epoch_duration = (self.duration_task - self.skip) / self.nEpochs
+        tmax = epoch_duration - (1.0 / sfreq)
+        if tmax <= tmin:
+            raise RuntimeError(
+                f"Invalid epoch window: duration={epoch_duration:.6f}s, sfreq={sfreq:.3f}Hz"
+            )
         
         events_from_annot, event_dict = mne.events_from_annotations(self.raw, verbose=False)
+        events_subset = events_from_annot[events_from_annot[:, 2] == int(event_id)]
+        if events_subset.size == 0:
+            raise RuntimeError(f"No events found for event id {event_id}")
 
-        # Create epochs from RAW data based on the specified event ID and time window
+        # MNE includes tmax, so subtracting one sample prevents requesting data past an exact boundary
         epochs_ = mne.Epochs(
             self.raw,
-            events_from_annot,
-            event_id=event_id,
+            events_subset,
+            event_id=int(event_id),
             tmin=tmin,
             tmax=tmax,
             baseline=None,
@@ -453,8 +724,8 @@ class EEGMotorImagery:
         )  # Expected number of segments
         expected_bins = int((fmax - fmin) / resolution + 1)  # Expected number of frequency bins
 
-        # Compute PSD using Welch's method
-        psd_ = self.epochs_dict[ batch ].compute_psd(
+        # Compute PSD using Welch's method and keep MNE's exact frequency vector
+        spectrum = self.epochs_dict[ batch ].compute_psd(
             method="welch",
             fmin=fmin,
             fmax=fmax,
@@ -467,7 +738,15 @@ class EEGMotorImagery:
             window="hann",
             # output="power", # only past version 1.4, before that it's power by default
             verbose=False,
-        ).get_data()
+        )
+        psd_ = spectrum.get_data()
+        freqs_ = np.asarray(getattr(spectrum, "freqs", []), dtype=float)
+        if freqs_.size == 0:
+            try:
+                _, freqs_ = spectrum.get_data(return_freqs=True)
+                freqs_ = np.asarray(freqs_, dtype=float)
+            except Exception:
+                freqs_ = np.arange(fmin, fmax + resolution, resolution, dtype=float)
 
         # Verbose output for PSD computation details
         if self.verbose:
@@ -490,56 +769,49 @@ class EEGMotorImagery:
         if aggregate_epochs:
             psd_ = np.mean(psd_, axis=0)
 
-        return psd_
+        return psd_, freqs_
 
     def _generate_psds(self) -> None:
         """Compute and store PSDs for all epoch batches, keeping both epoch-averaged and per-epoch PSD arrays"""
-        
-        fs   = self.raw.info['sfreq'   ]
-        fmin = self.raw.info['highpass']
-        fmax = self.raw.info['lowpass' ]
-        
-        secPerSegment = 1.0 / self.resolution
-        secOverlap    = secPerSegment / 2.0
-        nPerSegment   = int( secPerSegment * fs)
-        nOverlap      = int( secOverlap    * fs)
-        
+        fs = self.raw.info["sfreq"]
+        fmin = float(self.raw.info.get("highpass", 0.0) or 0.0)
+        fmax = float(self.raw.info.get("lowpass", fs / 2.0) or (fs / 2.0))
+
+        sec_per_segment = 1.0 / float(self.resolution)
+        sec_overlap = sec_per_segment / 2.0
+        n_per_segment = int(sec_per_segment * fs)
+        n_overlap = int(sec_overlap * fs)
+
         psds_dict = {}
         psds_epochs_dict = {}
-        
+
         for key in self.epochs_dict.keys():
             try:
-                # Epoch-averaged (for your stats pipeline)
-                psds_dict[ key ] = self._make_psds_batch(
+                psd_epochs, freqs = self._make_psds_batch(
                     batch=key,
                     resolution=self.resolution,
                     fmin=fmin,
                     fmax=fmax,
-                    nPerSegment=nPerSegment,
-                    nOverlap=nOverlap,
-                    aggregate_epochs=True,
-                )
-
-                # Per-epoch (for within-trial dynamics plots)
-                psds_epochs_dict[key] = self._make_psds_batch(
-                    batch=key,
-                    resolution=self.resolution,
-                    fmin=fmin,
-                    fmax=fmax,
-                    nPerSegment=nPerSegment,
-                    nOverlap=nOverlap,
+                    nPerSegment=n_per_segment,
+                    nOverlap=n_overlap,
                     aggregate_epochs=False,
                 )
-            except Exception:
-                pass
-        
-        
-        if len(list(psds_dict.keys())) == 0: 
+                psds_epochs_dict[key] = psd_epochs
+                psds_dict[key] = np.mean(psd_epochs, axis=0)
+                if not hasattr(self, "freqs"):
+                    self.freqs = np.asarray(freqs, dtype=float)
+                elif len(self.freqs) != len(freqs) or not np.allclose(self.freqs, freqs):
+                    self._warn(f"PSD frequency bins differ for batch '{key}'. Using first batch frequency vector")
+            except Exception as exc:
+                self._warn(f"PSD computation failed for batch '{key}': {exc}")
+                continue
+
+        if len(psds_dict) == 0:
             raise RuntimeError("There are no available PSDs")
-        
+
         self.psds_dict = psds_dict
         self.psds_epochs_dict = psds_epochs_dict
-    
+
     def _grab_left_right_electrodes(self) -> Tuple[List[str], List[str]]:
         """Split motor-imagery channels into left/right hemispheres using montage x-coordinates and store masks"""
         
@@ -628,7 +900,7 @@ class EEGMotorImagery:
             "observed": float(observed),
             "p": float(p),
             "p_interval": self.pvalue_interval(p, n_simulations),
-            "neg_log10_p": self.neg_p(p),
+            "neg_ln_p": self.neg_p(p),
             "null_distribution": np.asarray(hist),
             "n_simulations": int(n_simulations),
         }
@@ -659,7 +931,7 @@ class EEGMotorImagery:
             "observed": float(observed),
             "p": float(p),
             "p_interval": self.pvalue_interval(p, n_simulations),
-            "neg_log10_p": self.neg_p(p),
+            "neg_ln_p": self.neg_p(p),
             "null_distribution": np.asarray(hist),
             "n_simulations": int(n_simulations),
             "null_value": float(null_hypothesis_value),
@@ -796,13 +1068,12 @@ class EEGMotorImagery:
         n_blocks_task, n_ch, n_bins = psd_task.shape
         n_blocks_ctrl, n_ch, n_bins = psd_ctrl.shape
 
-        # Infer frequency axis from RAW info
-        fs = self.raw.info["sfreq"]
-        fmin = float(self.raw.info.get("highpass", 0.0) or 0.0)
-        fmax = float(self.raw.info.get("lowpass", fs / 2.0) or (fs / 2.0))
-        
-        resolution = self.resolution  # assuming this exists on the class
-        bins = np.arange(fmin, fmax + resolution, resolution)
+        # Use the exact frequency axis returned by MNE
+        bins = np.asarray(getattr(self, "freqs", []), dtype=float)
+        if bins.size != n_bins:
+            raise RuntimeError(
+                f"PSD frequency vector length ({bins.size}) does not match PSD bins ({n_bins})"
+            )
 
         # Decide contralateral side from task prefix
         tp = task_prefix.lower().rstrip("_")
@@ -824,12 +1095,13 @@ class EEGMotorImagery:
         band_results: Dict[str, Any] = {}
 
         for low_f, high_f in band_list:
-            band_idx = np.where((bins >= low_f) & (bins <= high_f))[0]
+            is_last_band = (low_f, high_f) == tuple(band_list[-1])
+            band_idx = self._band_indices(bins, low_f, high_f, is_last=is_last_band)
             if band_idx.size == 0:
                 raise ValueError(f"No frequency bins fall inside band [{low_f}, {high_f}) Hz")
-            start = band_idx[0 ]
-            stop  = band_idx[-1]
-            
+            start = int(band_idx[0])
+            stop = int(band_idx[-1]) + 1
+
             x_task = np.mean(x_task_all[:, :, start:stop], axis=2)
             x_ctrl = np.mean(x_ctrl_all[:, :, start:stop], axis=2)
             
@@ -894,7 +1166,7 @@ class EEGMotorImagery:
     def _run_stat_tests(
         self,
         transf: str = "r2",
-        verbose: bool = True,
+        verbose: bool = False,
     ) -> Dict[str, Any]:
         """Run band-wise statistical tests (including permutation/bootstrap where configured) and store results for later plots"""
         results: Dict[str, Any] = {}
@@ -910,7 +1182,7 @@ class EEGMotorImagery:
                     task_prefix=task_prefix,
                     control_prefix=control_prefix,
                     transf=transf,
-
+                    rng=self._rng_for(f"stats:{name}:{transf}"),
                 )
                 results[name] = res
 
@@ -929,9 +1201,473 @@ class EEGMotorImagery:
                 if verbose:
                     print(f"[{name}] skipped: {exc}")
 
+        if not results:
+            self._warn("No lateralized statistical comparisons were completed")
+
         self.stats_results = results
         return results
     
+
+    def _condition_from_epoch_key(self, key: str) -> str:
+        """Return base condition from a numbered epoch key"""
+        key = str(key).lower().strip()
+        for prefix in ("left_rest", "right_rest", "left", "right"):
+            if re.match(rf"^{prefix}_\d+$", key):
+                return prefix
+        return "other"
+
+    def _summarize_trial_quality(self) -> List[Dict[str, Any]]:
+        """Summarize candidate, kept, and dropped epochs per condition"""
+        try:
+            events_from_annot, event_dict = mne.events_from_annotations(self.raw, verbose=False)
+        except Exception as exc:
+            self._warn(f"Could not summarize trial quality: {exc}")
+            self.trial_quality_summary = []
+            return []
+
+        grouped: Dict[str, Dict[str, int]] = {}
+        for key, event_id in getattr(self, "event_ids", {}).items():
+            condition = self._condition_from_epoch_key(key)
+            row = grouped.setdefault(condition, {"candidate_epochs": 0, "kept_epochs": 0})
+            row["candidate_epochs"] += int(np.sum(events_from_annot[:, 2] == int(event_id)))
+            row["kept_epochs"] += int(len(self.epochs_dict.get(key, [])))
+
+        rows: List[Dict[str, Any]] = []
+        for condition in ("left", "right", "left_rest", "right_rest", "other"):
+            if condition not in grouped:
+                continue
+            candidate = int(grouped[condition]["candidate_epochs"])
+            kept = int(grouped[condition]["kept_epochs"])
+            dropped = max(candidate - kept, 0)
+            dropped_pct = 100.0 * dropped / candidate if candidate else np.nan
+            rows.append({
+                "condition": condition,
+                "candidate_epochs": candidate,
+                "kept_epochs": kept,
+                "dropped_epochs": dropped,
+                "dropped_pct": float(dropped_pct),
+            })
+
+        total_candidate = int(sum(r["candidate_epochs"] for r in rows))
+        total_kept = int(sum(r["kept_epochs"] for r in rows))
+        total_dropped = max(total_candidate - total_kept, 0)
+        rows.append({
+            "condition": "total",
+            "candidate_epochs": total_candidate,
+            "kept_epochs": total_kept,
+            "dropped_epochs": total_dropped,
+            "dropped_pct": 100.0 * total_dropped / total_candidate if total_candidate else np.nan,
+        })
+        self.trial_quality_summary = rows
+        return rows
+
+    @staticmethod
+    def _benjamini_hochberg(p_values: List[float]) -> List[float]:
+        """Benjamini-Hochberg FDR correction"""
+        p = np.asarray(p_values, dtype=float)
+        out = np.full_like(p, np.nan, dtype=float)
+        valid = np.where(np.isfinite(p))[0]
+        if valid.size == 0:
+            return out.tolist()
+
+        pv = p[valid]
+        order = np.argsort(pv)
+        ranked = pv[order]
+        m = float(len(ranked))
+        adjusted = ranked * m / np.arange(1, len(ranked) + 1)
+        adjusted = np.minimum.accumulate(adjusted[::-1])[::-1]
+        adjusted = np.clip(adjusted, 0.0, 1.0)
+        restored = np.empty_like(adjusted)
+        restored[order] = adjusted
+        out[valid] = restored
+        return out.tolist()
+
+    def _apply_fdr_to_stats(self) -> None:
+        """Add FDR-corrected p-values to permutation and bootstrap results"""
+        if not hasattr(self, "stats_results") or not self.stats_results:
+            return
+
+        for test_name in ("permutation", "bootstrap"):
+            records = []
+            p_values = []
+            for comp_name, comp_res in self.stats_results.items():
+                for band_key, bres in (comp_res.get("band_results") or {}).items():
+                    test = bres.get(test_name, {})
+                    records.append((comp_name, band_key, test_name))
+                    p_values.append(float(test.get("p", np.nan)))
+
+            adjusted = self._benjamini_hochberg(p_values)
+            for (comp_name, band_key, tname), p_adj in zip(records, adjusted):
+                self.stats_results[comp_name]["band_results"][band_key][tname]["p_fdr"] = float(p_adj)
+                self.stats_results[comp_name]["band_results"][band_key][tname]["neg_ln_p_fdr"] = self.neg_p(p_adj)
+
+    def _effect_direction_label(self, observed: float) -> str:
+        """Explain the observed sign of the lateralized statistic"""
+        if not np.isfinite(observed):
+            return "unavailable"
+        if observed > 0:
+            return "ipsilateral effect > contralateral effect"
+        if observed < 0:
+            return "contralateral effect > ipsilateral effect"
+        return "no lateralized difference"
+
+    def _build_main_result_summary(self) -> List[Dict[str, Any]]:
+        """Build compact strongest-effect rows for report and CSV export"""
+        rows: List[Dict[str, Any]] = []
+        if not hasattr(self, "stats_results") or not self.stats_results:
+            self.main_result_summary = rows
+            return rows
+
+        for comp_name, comp_res in self.stats_results.items():
+            candidate_rows = []
+            for band_key, bres in (comp_res.get("band_results") or {}).items():
+                boot = bres.get("bootstrap", {})
+                perm = bres.get("permutation", {})
+                observed = float(boot.get("observed", np.nan))
+                candidate_rows.append({
+                    "comparison": comp_name,
+                    "band": band_key,
+                    "observed_delta": observed,
+                    "bootstrap_p": float(boot.get("p", np.nan)),
+                    "bootstrap_p_fdr": float(boot.get("p_fdr", np.nan)),
+                    "permutation_p": float(perm.get("p", np.nan)),
+                    "permutation_p_fdr": float(perm.get("p_fdr", np.nan)),
+                    "direction": self._effect_direction_label(observed),
+                    "n_task_blocks": int(comp_res.get("n_blocks_task_ctrl", [0, 0])[0]),
+                    "n_control_blocks": int(comp_res.get("n_blocks_task_ctrl", [0, 0])[1]),
+                })
+
+            if candidate_rows:
+                candidate_rows.sort(key=lambda r: (np.nan_to_num(r["bootstrap_p_fdr"], nan=1.0), -abs(np.nan_to_num(r["observed_delta"], nan=0.0))))
+                rows.append(candidate_rows[0])
+
+        self.main_result_summary = rows
+        return rows
+
+    def _run_decoding_analysis(self) -> List[Dict[str, Any]]:
+        """Run optional task-vs-rest decoding for each comparison, band, and ROI"""
+        try:
+            from sklearn.discriminant_analysis import LinearDiscriminantAnalysis
+            from sklearn.metrics import accuracy_score, balanced_accuracy_score, confusion_matrix, roc_auc_score
+            from sklearn.model_selection import StratifiedKFold, cross_val_predict
+            from sklearn.pipeline import make_pipeline
+            from sklearn.preprocessing import StandardScaler
+        except Exception as exc:
+            self._warn(f"Skipping decoding because scikit-learn is unavailable: {exc}")
+            self.decoding_results = []
+            return []
+
+        if not hasattr(self, "stats_results") or not self.stats_results:
+            self.decoding_results = []
+            return []
+
+        labels = [lbl.lower() for lbl in self.ch_set.get_labels()]
+        mi_set = {ch.lower() for ch in self.ch_motor_imagery}
+
+        def _roi_indices(comp_res: Dict[str, Any], roi: str) -> List[int]:
+            task_prefix = str(comp_res.get("task_prefix", "")).lower().rstrip("_")
+            if task_prefix.startswith("left"):
+                contra_names = {ch.lower() for ch in self.chRight}
+                ipsi_names = {ch.lower() for ch in self.chLeft}
+            else:
+                contra_names = {ch.lower() for ch in self.chLeft}
+                ipsi_names = {ch.lower() for ch in self.chRight}
+
+            if roi == "contra":
+                roi_set = contra_names
+            elif roi == "ipsi":
+                roi_set = ipsi_names
+            else:
+                roi_set = mi_set
+
+            return [i for i, lbl in enumerate(labels) if lbl in mi_set and lbl in roi_set]
+
+        def _decode_one(
+            x_ctrl: np.ndarray,
+            x_task: np.ndarray,
+            comp_name: str,
+            band_key: str,
+            roi_name: str,
+        ) -> Optional[Dict[str, Any]]:
+            x = np.vstack([x_ctrl, x_task])
+            y = np.array([0] * len(x_ctrl) + [1] * len(x_task), dtype=int)
+
+            class_counts = np.bincount(y, minlength=2)
+            min_class = int(np.min(class_counts))
+            if min_class < 2:
+                self._warn(f"Skipping decoding for {comp_name} {band_key} {roi_name}: fewer than 2 samples in one class")
+                return None
+
+            n_splits = int(min(5, min_class))
+            cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=self.random_state)
+            clf = make_pipeline(StandardScaler(), LinearDiscriminantAnalysis(solver="lsqr", shrinkage="auto"))
+
+            y_pred = cross_val_predict(clf, x, y, cv=cv, method="predict")
+            try:
+                y_score = cross_val_predict(clf, x, y, cv=cv, method="predict_proba")[:, 1]
+                roc_auc = float(roc_auc_score(y, y_score))
+            except Exception:
+                roc_auc = float("nan")
+
+            cm = confusion_matrix(y, y_pred, labels=[0, 1])
+            self.decoding_confusion_matrices[(comp_name, band_key, roi_name)] = cm
+
+            return {
+                "comparison": comp_name,
+                "band": band_key,
+                "roi": roi_name,
+                "classifier": "Shrinkage LDA",
+                "cv": f"StratifiedKFold({n_splits})",
+                "n_samples": int(len(y)),
+                "n_control": int(class_counts[0]),
+                "n_task": int(class_counts[1]),
+                "n_features": int(x.shape[1]),
+                "accuracy": float(accuracy_score(y, y_pred)),
+                "balanced_accuracy": float(balanced_accuracy_score(y, y_pred)),
+                "roc_auc": roc_auc,
+                "tn": int(cm[0, 0]),
+                "fp": int(cm[0, 1]),
+                "fn": int(cm[1, 0]),
+                "tp": int(cm[1, 1]),
+            }
+
+        rows: List[Dict[str, Any]] = []
+        self.decoding_confusion_matrices: Dict[Tuple[str, str, str], np.ndarray] = {}
+
+        for comp_name, comp_res in self.stats_results.items():
+            for band_key, bres in (comp_res.get("band_results") or {}).items():
+                for roi_name in ("contra", "ipsi"):
+                    roi_idx = _roi_indices(comp_res, roi_name)
+                    if not roi_idx:
+                        self._warn(f"Skipping decoding for {comp_name} {band_key} {roi_name}: no ROI channels found")
+                        continue
+
+                    x_ctrl = np.asarray(bres.get("x_control"), dtype=float)[:, roi_idx]
+                    x_task = np.asarray(bres.get("x_task"), dtype=float)[:, roi_idx]
+
+                    try:
+                        row = _decode_one(x_ctrl, x_task, comp_name, band_key, roi_name)
+                        if row is not None:
+                            rows.append(row)
+                    except Exception as exc:
+                        self._warn(f"Decoding failed for {comp_name} {band_key} {roi_name}: {exc}")
+
+        self.decoding_results = rows
+        return rows
+
+    def _plot_decoding_summary(self) -> Optional[Tuple[Figure, Axes]]:
+        """Plot decoding balanced accuracy per comparison, band, and ROI"""
+        rows = getattr(self, "decoding_results", [])
+        if not rows:
+            return None
+
+        def _band_start(row: Dict[str, Any]) -> float:
+            band = str(row.get("band", ""))
+            return float(band.split("-")[0]) if "-" in band else 0.0
+
+        groups: List[Tuple[str, str]] = []
+        for row in sorted(rows, key=lambda r: (str(r.get("comparison", "")), _band_start(r))):
+            key = (str(row.get("comparison", "")), str(row.get("band", "")))
+            if key not in groups:
+                groups.append(key)
+
+        y = np.arange(len(groups))
+        labels = [f"{comp.replace('_vs_', ' vs ')}\n{band}" for comp, band in groups]
+        values: Dict[Tuple[str, str, str], float] = {}
+        for row in rows:
+            values[(str(row.get("comparison", "")), str(row.get("band", "")), str(row.get("roi", "both")))] = float(row.get("balanced_accuracy", np.nan))
+
+        fig, ax = plt.subplots(1, 1, figsize=(8, max(3.2, 0.55 * len(groups))))
+        offsets = {"contra": -0.13, "ipsi": 0.13}
+        colors = {"contra": "tab:blue", "ipsi": "tab:orange"}
+        labels_done: set[str] = set()
+
+        for roi_name in ("contra", "ipsi"):
+            roi_values = [values.get((comp, band, roi_name), np.nan) for comp, band in groups]
+            label = f"{roi_name} ROI" if roi_name not in labels_done else None
+            ax.barh(y + offsets[roi_name], roi_values, height=0.24, label=label, color=colors[roi_name], alpha=0.85)
+            labels_done.add(roi_name)
+
+        ax.axvline(0.5, linestyle="--", linewidth=1, color="0.3", label="chance")
+        ax.set_yticks(y)
+        ax.set_yticklabels(labels, fontsize=8)
+        ax.set_xlim(0.0, 1.0)
+        ax.set_xlabel("Cross-validated balanced accuracy")
+        ax.set_title("Task-vs-rest decoding by ROI", loc="left")
+        ax.legend(frameon=False, loc="lower right")
+        ax.grid(True, axis="x", linestyle=":", alpha=0.35)
+        fig.subplots_adjust(bottom=0.18)
+        fig.text(
+            0.01,
+            -0.04,
+            "Features: band-averaged PSD from contra or ipsi motor ROI channels\nValues above 0.50 indicate task/rest separation beyond chance",
+            ha="left",
+            va="bottom",
+            fontsize=8,
+        )
+        self._savefig(fig, "decoding_summary")
+        return fig, ax
+
+    def _plot_decoding_confusion_best(self) -> Optional[Tuple[Figure, Axes]]:
+        """Plot the confusion matrix for the strongest decoding result"""
+        rows = getattr(self, "decoding_results", [])
+        matrices = getattr(self, "decoding_confusion_matrices", {})
+        if not rows or not matrices:
+            return None
+
+        best = sorted(rows, key=lambda r: np.nan_to_num(r.get("balanced_accuracy", np.nan), nan=-1.0), reverse=True)[0]
+        key = (best["comparison"], best["band"], best.get("roi", "both"))
+        cm = matrices.get(key)
+        if cm is None:
+            return None
+
+        fig, ax = plt.subplots(1, 1, figsize=(4.6, 4.3))
+        im = ax.imshow(cm)
+        ax.set_xticks([0, 1])
+        ax.set_xticklabels(["Pred rest", "Pred task"])
+        ax.set_yticks([0, 1])
+        ax.set_yticklabels(["True rest", "True task"])
+        for i in range(2):
+            for j in range(2):
+                ax.text(j, i, str(int(cm[i, j])), ha="center", va="center")
+        ax.set_title(
+            f"Best decoding: {best['comparison']} {best['band']} {best.get('roi', 'both')} ROI",
+            loc="left",
+            fontsize=10,
+        )
+        ax.set_xlabel("Cross-validated prediction")
+        ax.set_ylabel("True label")
+        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        fig.tight_layout()
+        self._savefig(fig, "decoding_confusion_best")
+        return fig, ax
+
+    def _export_all_csv(self) -> None:
+        """Export all analysis tables in a consistent, report-friendly form"""
+        self._export_parameter_csv()
+        self._export_paradigm_validation_csv()
+        self._export_trial_quality_csv()
+        self._export_psd_csv()
+        self._export_psd_long_csv()
+        self._export_r2_csv()
+        self._export_stat_summary_csv()
+        self._export_bootstrap_csv()
+        self._export_erd_ers_csv()
+        self._export_decoding_csv()
+
+    def _write_csv_rows(self, filename: str, rows: List[Dict[str, Any]], fieldnames: Optional[List[str]] = None) -> Optional[str]:
+        """Write a list of dictionaries to CSV"""
+        if self.save_path is None or not rows:
+            return None
+        if fieldnames is None:
+            fieldnames = list(rows[0].keys())
+        fname = self._csv_path(filename)
+        if fname is None:
+            return None
+        with open(fname, "w", newline="") as fh:
+            writer = csv.DictWriter(fh, fieldnames=fieldnames)
+            writer.writeheader()
+            for row in rows:
+                writer.writerow({k: row.get(k, "") for k in fieldnames})
+        self._track_export(fname)
+        print(f"[CSV] Saved → {fname}")
+        return fname
+
+    def _export_parameter_csv(self) -> None:
+        """Export run parameters"""
+        rows = [{"parameter": k, "value": json.dumps(v) if isinstance(v, (list, dict)) else v} for k, v in self.parameter_summary.items()]
+        self._write_csv_rows("analysis_parameters.csv", rows, ["parameter", "value"])
+
+    def _export_paradigm_validation_csv(self) -> None:
+        """Export inferred paradigm label validation"""
+        self._write_csv_rows("paradigm_validation_summary.csv", getattr(self, "paradigm_event_summary", []), ["label", "count", "status"])
+
+    def _export_trial_quality_csv(self) -> None:
+        """Export per-condition epoch drop summary"""
+        self._write_csv_rows(
+            "trial_quality_summary.csv",
+            getattr(self, "trial_quality_summary", []),
+            ["condition", "candidate_epochs", "kept_epochs", "dropped_epochs", "dropped_pct"],
+        )
+
+    def _export_stat_summary_csv(self) -> None:
+        """Export compact band-wise statistical summary with FDR-corrected p-values"""
+        rows: List[Dict[str, Any]] = []
+        for comp_name, comp_res in getattr(self, "stats_results", {}).items():
+            n_task, n_ctrl = comp_res.get("n_blocks_task_ctrl", [np.nan, np.nan])
+            for band_key, bres in (comp_res.get("band_results") or {}).items():
+                boot = bres.get("bootstrap", {})
+                perm = bres.get("permutation", {})
+                dist = np.asarray(boot.get("null_distribution", []), dtype=float)
+                ci_low, ci_high = self._percentile_ci(dist, ci=95.0) if dist.size else (np.nan, np.nan)
+                observed = float(boot.get("observed", np.nan))
+                rows.append({
+                    "comparison": comp_name,
+                    "band": band_key,
+                    "observed_delta": observed,
+                    "direction": self._effect_direction_label(observed),
+                    "bootstrap_ci_low": ci_low,
+                    "bootstrap_ci_high": ci_high,
+                    "bootstrap_p": float(boot.get("p", np.nan)),
+                    "bootstrap_p_fdr": float(boot.get("p_fdr", np.nan)),
+                    "permutation_p": float(perm.get("p", np.nan)),
+                    "permutation_p_fdr": float(perm.get("p_fdr", np.nan)),
+                    "neg_ln_bootstrap_p": float(boot.get("neg_ln_p", np.nan)),
+                    "neg_ln_bootstrap_p_fdr": float(boot.get("neg_ln_p_fdr", np.nan)),
+                    "n_task_blocks": int(n_task),
+                    "n_control_blocks": int(n_ctrl),
+                    "n_simulations": int(boot.get("n_simulations", self.nSim)),
+                })
+        self._write_csv_rows("stat_summary_per_band.csv", rows)
+
+    def _export_decoding_csv(self) -> None:
+        """Export optional decoding metrics"""
+        self._write_csv_rows("decoding_summary.csv", getattr(self, "decoding_results", []))
+
+    def _export_erd_ers_csv(self) -> None:
+        """Export ERD/ERS time-course values for common mu and beta bands"""
+        rows: List[Dict[str, Any]] = []
+        for task, rest in (("left", "left_rest"), ("right", "right_rest")):
+            for band in ((8.0, 13.0), (13.0, 31.0)):
+                try:
+                    curve = self._compute_within_trial_erd_ers(task, rest, band=band, roi="contra")
+                except Exception as exc:
+                    self._warn(f"Could not export ERD/ERS for {task} {band}: {exc}")
+                    continue
+                for i, t in enumerate(curve["time_sec"]):
+                    rows.append({
+                        "task": task,
+                        "rest": rest,
+                        "band": f"{band[0]:g}-{band[1]:g}Hz",
+                        "roi": "contra",
+                        "time_sec": float(t),
+                        "erd_ers_pct": float(curve["mean_pct"][i]),
+                        "ci_low": float(curve["ci_low"][i]),
+                        "ci_high": float(curve["ci_high"][i]),
+                        "n_trials": int(curve["n_trials"]),
+                    })
+        self._write_csv_rows("erd_ers_timecourse.csv", rows)
+
+    def _export_report_metadata_json(self) -> None:
+        """Export report and analysis metadata alongside the PDF"""
+        if self.save_path is None:
+            return
+        payload = {
+            "parameters": self.parameter_summary,
+            "paradigm_validation": getattr(self, "paradigm_event_summary", []),
+            "trial_quality": getattr(self, "trial_quality_summary", []),
+            "main_results": getattr(self, "main_result_summary", []),
+            "decoding_results": getattr(self, "decoding_results", []),
+            "generated_figures": [self._relative_output_path(x) for x in self.generated_figures],
+            "exported_files": [self._relative_output_path(x) for x in self.exported_files],
+            "warnings": self.analysis_warnings,
+        }
+        path = os.path.join(self.save_path, "report_metadata.json")
+        with open(path, "w") as fh:
+            json.dump(payload, fh, indent=2)
+        self._track_export(path)
+        self._info(f"Metadata saved → {path}")
+
     # Plotting utilities
     def _ensure_stats_results(self, transf: str = "r2") -> Dict[str, Any]:
         """Ensure that lateralized stats results exist on the instance"""
@@ -1107,8 +1843,7 @@ class EEGMotorImagery:
             elif 'right' in comparison:
                 key = 'right'
             
-            fig.savefig(os.path.join(self.save_path, f"stat_distribution_{key}.png"), bbox_inches="tight")
-            fig.savefig(os.path.join(self.save_path, f"stat_distribution_{key}.svg"), bbox_inches="tight")
+            self._savefig(fig, f"stat_distribution_{key}")
             
         return fig, axs       
             
@@ -1462,8 +2197,7 @@ class EEGMotorImagery:
         fig.subplots_adjust(wspace=0)
         
         if self.save_path is not None:
-            fig.savefig(os.path.join(self.save_path, "topoplot.png"), bbox_inches="tight")
-            fig.savefig(os.path.join(self.save_path, "topoplot.svg"), bbox_inches="tight")
+            self._savefig(fig, "topoplot")
         
         return fig, axs_rows
 
@@ -1561,12 +2295,7 @@ class EEGMotorImagery:
         elif "right_vs_right_rest" in results and "bins" in results["right_vs_right_rest"]:
             freqs = np.asarray(results["right_vs_right_rest"]["bins"])
         else:
-            # Fallback: reconstruct bins from RAW info
-            fs = float(self.raw.info["sfreq"])
-            fmin = float(self.raw.info.get("highpass", 0.0) or 0.0)
-            fmax = float(self.raw.info.get("lowpass", fs / 2.0) or (fs / 2.0))
-            resolution = float(self.resolution)
-            freqs = np.arange(fmin, fmax + resolution, resolution)
+            freqs = np.asarray(getattr(self, "freqs", []), dtype=float)
 
         if freqs.shape[0] != n_bins:
             raise RuntimeError(
@@ -1749,8 +2478,7 @@ class EEGMotorImagery:
         fig.subplots_adjust(hspace=0)
         
         if self.save_path is not None:
-            fig.savefig(os.path.join(self.save_path, f"psd_{ch_name}.png"), bbox_inches="tight")
-            fig.savefig(os.path.join(self.save_path, f"psd_{ch_name}.svg"), bbox_inches="tight")
+            self._savefig(fig, f"psd_{ch_name}")
 
         return fig, (ax1, ax2)
 
@@ -1986,11 +2714,8 @@ class EEGMotorImagery:
         )
         
         if self.save_path is not None:
-            fig_left.savefig(os.path.join(self.save_path, "pvalue_left.png"), bbox_inches="tight")
-            fig_left.savefig(os.path.join(self.save_path, "pvalue_left.svg"), bbox_inches="tight")
-            
-            fig_right.savefig(os.path.join(self.save_path, "pvalue_right.png"), bbox_inches="tight")
-            fig_right.savefig(os.path.join(self.save_path, "pvalue_right.svg"), bbox_inches="tight")
+            self._savefig(fig_left, "pvalue_left")
+            self._savefig(fig_right, "pvalue_right")
 
         return (fig_left, ax_left), (fig_right, ax_right)
 
@@ -2084,7 +2809,8 @@ class EEGMotorImagery:
                     for k in epoch_keys
                 )
             )
-        except Exception:
+        except Exception as exc:
+            self._warn(f"Could not estimate discarded epochs: {exc}")
             total_epochs = 0
 
         kept_epochs = 0
@@ -2131,14 +2857,7 @@ class EEGMotorImagery:
         fig.tight_layout()
 
         if self.save_path is not None:
-            fig.savefig(
-                os.path.join(self.save_path, "paradigm_timeline.png"),
-                bbox_inches="tight",
-            )
-            fig.savefig(
-                os.path.join(self.save_path, "paradigm_timeline.svg"),
-                bbox_inches="tight",
-            )
+            self._savefig(fig, "paradigm_timeline")
 
         return fig, ax
 
@@ -2159,9 +2878,9 @@ class EEGMotorImagery:
         self,
         transf: str = "r2",
         ci: float = 95.0,
-        figsize: Tuple[float, float] = (8.0, 4.0),
+        figsize: Tuple[float, float] = (8.0, 4.2),
     ) -> Figure:
-        """
+        r"""
         Forest plot: observed $\Delta$ per band with bootstrap CI,
         for left_vs_left_rest and right_vs_right_rest
         """
@@ -2178,7 +2897,7 @@ class EEGMotorImagery:
 
         band_keys = sorted(
             band_keys,
-            key=lambda s: float(s.split("-")[0]) if "-" in s else 0.0
+            key=lambda s: float(s.split("-")[0]) if "-" in s else 0.0,
         )
 
         def _extract(comp: Dict[str, Any]) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -2196,47 +2915,83 @@ class EEGMotorImagery:
 
         obs_l, lo_l, hi_l = _extract(left_res)
         obs_r, lo_r, hi_r = _extract(right_res)
-
         y = np.arange(len(band_keys))
 
         fig, ax = plt.subplots(1, 1, figsize=figsize)
 
-        # Left $\Delta$
+        finite_values = np.concatenate([obs_l, lo_l, hi_l, obs_r, lo_r, hi_r])
+        finite_values = finite_values[np.isfinite(finite_values)]
+        if finite_values.size:
+            span = float(np.nanmax(finite_values) - np.nanmin(finite_values))
+            pad = max(span * 0.15, 0.05)
+            x_min = min(0.0, float(np.nanmin(finite_values)) - pad)
+            x_max = max(0.0, float(np.nanmax(finite_values)) + pad)
+        else:
+            x_min, x_max = -1.0, 1.0
+
+        ax.axvspan(x_min, 0.0, color="#f7c7c7", alpha=0.28, zorder=0)
+        #ax.axvspan(0.0, x_max, color="#c8e6c9", alpha=0.28, zorder=0, label=r"Good: $\Delta > 0$")
+
         ax.errorbar(
-            obs_l, y - 0.12,
+            obs_l,
+            y - 0.12,
             xerr=[obs_l - lo_l, hi_l - obs_l],
-            fmt="o", capsize=3, label="Left hand (vs rest)"
+            fmt="o",
+            capsize=3,
+            color="tab:blue",
+            ecolor="tab:blue",
+            label="Left hand (vs rest)",
+            zorder=3,
         )
-        # Right $\Delta$
         ax.errorbar(
-            obs_r, y + 0.12,
+            obs_r,
+            y + 0.12,
             xerr=[obs_r - lo_r, hi_r - obs_r],
-            fmt="o", capsize=3, label="Right hand (vs rest)"
+            fmt="s",
+            capsize=3,
+            color="tab:red",
+            ecolor="tab:red",
+            label="Right hand (vs rest)",
+            zorder=3,
         )
 
-        ax.axvline(0.0, linestyle="--", linewidth=1, color='grey', label=r'$\Delta = 0$')
+        ax.axvline(0.0, linestyle="--", linewidth=1, color="0.25", label=r"$\Delta = 0$", zorder=2)
+        ax.set_xlim(x_min, x_max)
         ax.set_yticks(y)
         ax.set_yticklabels([bk.replace("Hz", " Hz") for bk in band_keys])
-        ax.invert_yaxis()  # first bands at the top
-        ax.set_xlabel(r"Observed $\Delta$", loc='right')
-        ax.set_title("Band-wise observed value with 95% CI (bootstrap)", loc="left", fontsize=10)
-        ax.legend(frameon=False)
-        fig.tight_layout()
-
-
-        # Explain $\Delta$ at the bottom of the figure
-        delta_note1 = (
-            r"$\Delta$ = $\sum$ ipsilateral signed $r^2$ "
-            r"$-$ $\sum$ contralateral signed $r^2$"
+        ax.invert_yaxis()
+        ax.set_xlabel(r"Observed $\Delta$", loc="right")
+        ax.set_title("Band-wise bootstrap CI and one-sided target region", loc="left", fontsize=10)
+        ax.text(
+            0.995,
+            1.02,
+            r"One-sided target: $\Delta > 0$",
+            transform=ax.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=9,
+            weight="bold",
         )
-        fig.subplots_adjust(bottom=0.2)
-        fig.text(0.01, 0.05, delta_note1, ha="left", va="bottom", fontsize=9)
-        delta_note2 = r"Computed from band-averaged PSD (task vs rest) using target channels"
-        fig.text(0.01, 0.02, delta_note2, ha="left", va="bottom", fontsize=9)
+        ax.grid(True, axis="x", linestyle=":", alpha=0.35)
+        ax.legend(frameon=False, fontsize=8, ncols=1)
+
+        fig.subplots_adjust(bottom=0.24)
+
+        "Features: band-averaged PSD from contra or ipsi motor ROI channels\nValues above 0.50 indicate task/rest separation beyond chance",
+
+
+        fig.text(0.01,0.07, 
+                 r"$\Delta$ = $\sum$ ipsilateral signed $r^2$ $-$ $\sum$ contralateral signed $r^2$",
+                 ha="left", va="bottom", fontsize=9)
+        fig.text(0.01,0.04, 
+                 "Computed from band-averaged PSD (tast vs rest) using target channels",
+                 ha="left", va="bottom", fontsize=9)
+        fig.text(0.01,0.01, 
+                 r"Bad/opposite effect: $\Delta \leq 0$",
+                 ha="left", va="bottom", fontsize=9)
 
         if self.save_path is not None:
-            fig.savefig(os.path.join(self.save_path, "band_effect.png"), bbox_inches="tight")
-            fig.savefig(os.path.join(self.save_path, "band_effect.svg"), bbox_inches="tight")
+            self._savefig(fig, "band_effect")
 
         return fig, ax
 
@@ -2275,7 +3030,7 @@ class EEGMotorImagery:
         Export the mean PSD (averaged across all trial batches) per channel per
         frequency bin for motor imagery channels of interest.
 
-        Output file: <save_path>/psd_mean_per_channel_per_bin.csv
+        Output file: <save_path>/csv/psd_mean_per_channel_per_bin.csv
         Layout:
             rows    — one per motor imagery channel found in the recording
             columns — 'channel', then one column per frequency bin labelled
@@ -2303,41 +3058,63 @@ class EEGMotorImagery:
                   "Skipping PSD CSV export.")
             return
 
-        # ── Frequency axis ─────────────────────────────────────────────────
-        fs   = float(self.raw.info["sfreq"])
-        fmin = float(self.raw.info.get("highpass", 0.0) or 0.0)
-        fmax = float(self.raw.info.get("lowpass", fs / 2.0) or (fs / 2.0))
-
         # ── Average PSD across all batches ─────────────────────────────────
         # Each psds_dict value has shape (n_ch, n_bins)
         all_psds = np.stack(list(self.psds_dict.values()), axis=0)  # (n_batches, ch, bins)
         mean_psd  = np.mean(all_psds, axis=0)                        # (ch, bins)
 
         n_bins = mean_psd.shape[1]
-        freqs  = np.arange(fmin, fmax + self.resolution, self.resolution)
-        if freqs.size > n_bins:
-            freqs = freqs[:n_bins]
-        elif freqs.size < n_bins:
-            freqs = np.linspace(fmin, fmax, n_bins)
+        freqs = np.asarray(getattr(self, "freqs", []), dtype=float)
+        if freqs.size != n_bins:
+            raise RuntimeError(
+                f"PSD frequency vector length ({freqs.size}) does not match PSD bins ({n_bins})"
+            )
 
         mi_psd = mean_psd[mi_indices, :]  # (n_mi_ch, bins)
 
         # ── Write CSV ──────────────────────────────────────────────────────
-        fname = os.path.join(self.save_path, "psd_mean_per_channel_per_bin.csv")
+        fname = self._csv_path("psd_mean_per_channel_per_bin.csv")
+        if fname is None:
+            return
         with open(fname, "w", newline="") as fh:
             writer = _csv.writer(fh)
             writer.writerow(["channel"] + [f"{f:.4g}" for f in freqs])
             for ch_name, psd_row in zip(mi_names, mi_psd):
                 writer.writerow([ch_name] + [f"{v:.6e}" for v in psd_row])
 
+        self._track_export(fname)
         print(f"[CSV] PSD mean per channel per bin saved → {fname}")
+
+    def _export_psd_long_csv(self) -> None:
+        """Export condition-level PSD in tidy long format"""
+        if not hasattr(self, "psds_dict") or not self.psds_dict:
+            return
+        labels = [lbl.lower() for lbl in self.ch_set.get_labels()]
+        mi_set = {ch.lower() for ch in self.ch_motor_imagery}
+        mi_indices = [i for i, lbl in enumerate(labels) if lbl in mi_set]
+        freqs = np.asarray(getattr(self, "freqs", []), dtype=float)
+        rows: List[Dict[str, Any]] = []
+        for key, psd in self.psds_dict.items():
+            condition = self._condition_from_epoch_key(key)
+            psd = np.asarray(psd, dtype=float)
+            for ch_idx in mi_indices:
+                for f_idx, freq in enumerate(freqs):
+                    rows.append({
+                        "batch": key,
+                        "condition": condition,
+                        "channel": labels[ch_idx],
+                        "frequency_hz": float(freq),
+                        "psd_power": float(psd[ch_idx, f_idx]),
+                        "psd_db": float(10.0 * np.log10(psd[ch_idx, f_idx] * 1e12)),
+                    })
+        self._write_csv_rows("psd_long_format.csv", rows)
 
     def _export_r2_csv(self) -> None:
         """
         Export signed r² per frequency band per channel for motor imagery
         channels of interest.
 
-        Output file: <save_path>/signed_r2_per_band_per_channel.csv
+        Output file: <save_path>/csv/signed_r2_per_band_per_channel.csv
         Layout:
             rows    — one per (comparison × frequency band) combination,
                       e.g. ('left_vs_left_rest', '4-7Hz')
@@ -2364,7 +3141,9 @@ class EEGMotorImagery:
             return
 
         # ── Write CSV ──────────────────────────────────────────────────────
-        fname = os.path.join(self.save_path, "signed_r2_per_band_per_channel.csv")
+        fname = self._csv_path("signed_r2_per_band_per_channel.csv")
+        if fname is None:
+            return
         with open(fname, "w", newline="") as fh:
             writer = _csv.writer(fh)
             writer.writerow(["comparison", "band"] + mi_names)
@@ -2377,6 +3156,7 @@ class EEGMotorImagery:
                         [comp_name, band_key] + [f"{v:.6f}" for v in mi_effects]
                     )
 
+        self._track_export(fname)
         print(f"[CSV] Signed r² per band per channel saved → {fname}")
 
     def _export_bootstrap_csv(self, ci: float = 95.0) -> None:
@@ -2389,7 +3169,7 @@ class EEGMotorImagery:
         contralateral minus ipsilateral).  The confidence interval reported
         here is therefore a bootstrap CI on that effect estimate.
 
-        Output file: <save_path>/bootstrap_stats_per_band.csv
+        Output file: <save_path>/csv/bootstrap_stats_per_band.csv
         Columns:
             comparison   — e.g. 'left_vs_left_rest'
             band         — e.g. '4-7Hz'
@@ -2412,7 +3192,9 @@ class EEGMotorImagery:
         alpha_lo = (100.0 - ci) / 2.0
         alpha_hi = 100.0 - alpha_lo
 
-        fname = os.path.join(self.save_path, "bootstrap_stats_per_band.csv")
+        fname = self._csv_path("bootstrap_stats_per_band.csv")
+        if fname is None:
+            return
         with open(fname, "w", newline="") as fh:
             writer = _csv.writer(fh)
             writer.writerow([
@@ -2447,6 +3229,7 @@ class EEGMotorImagery:
                         n_sim,
                     ])
 
+        self._track_export(fname)
         print(f"[CSV] Bootstrap stats per band saved → {fname}")
 
     def _bandpower_envelope(
@@ -2476,21 +3259,14 @@ class EEGMotorImagery:
 
         n_bins = psd.shape[2]
 
-        # Frequency axis consistent with your Welch setup
-        fs = float(self.raw.info["sfreq"])
-        fmin = float(self.raw.info.get("highpass", 0.0) or 0.0)
-        fmax = float(self.raw.info.get("lowpass", fs / 2.0) or (fs / 2.0))
-        resolution = float(self.resolution)
-
-        freqs = np.arange(fmin, fmax + resolution, resolution)
-        if freqs.size > n_bins:
-            freqs = freqs[:n_bins]
-        elif freqs.size < n_bins:
-            # Fallback: interpolate to expected length (rare, but avoids hard crashes)
-            freqs = np.linspace(fmin, fmax, n_bins)
+        freqs = np.asarray(getattr(self, "freqs", []), dtype=float)
+        if freqs.size != n_bins:
+            raise RuntimeError(
+                f"PSD frequency vector length ({freqs.size}) does not match PSD bins ({n_bins})"
+            )
 
         low_f, high_f = float(band[0]), float(band[1])
-        band_idx = np.where((freqs >= low_f) & (freqs <= high_f))[0]
+        band_idx = self._band_indices(freqs, low_f, high_f, is_last=True)
         if band_idx.size == 0:
             raise ValueError(f"No frequency bins fall inside band [{low_f}, {high_f}] Hz")
 
@@ -2501,6 +3277,67 @@ class EEGMotorImagery:
         bp = np.mean(psd[:, :, start:stop], axis=(1, 2))
         return bp
 
+
+    def _compute_within_trial_erd_ers(
+        self,
+        task_prefix: str,
+        rest_prefix: str,
+        band: Tuple[float, float],
+        roi: str = "contra",
+        ci: float = 95.0,
+    ) -> Dict[str, Any]:
+        """Compute ERD/ERS percent change over within-trial segments"""
+        task_prefix_l = task_prefix.lower().rstrip("_")
+        contra_set = set([c.lower() for c in (self.chRight if task_prefix_l.startswith("left") else self.chLeft)])
+        ipsi_set = set([c.lower() for c in (self.chLeft if task_prefix_l.startswith("left") else self.chRight)])
+        both_set = set([c.lower() for c in self.ch_motor_imagery])
+
+        if roi == "contra":
+            picks = self._resolve_picks_from_names(list(contra_set))
+        elif roi == "ipsi":
+            picks = self._resolve_picks_from_names(list(ipsi_set))
+        else:
+            picks = self._resolve_picks_from_names(list(both_set))
+
+        task_keys = self._trial_keys_for_prefix(task_prefix)
+        rest_keys = self._trial_keys_for_prefix(rest_prefix)
+        n_trials = min(len(task_keys), len(rest_keys))
+        if n_trials == 0:
+            raise RuntimeError(f"No trials found for {task_prefix=} or {rest_prefix=}")
+
+        delta = (self.duration_task - self.skip) / float(self.nEpochs)
+        t = np.arange(self.nEpochs) * delta + (delta / 2.0)
+        task_mat = []
+        rest_mat = []
+
+        for i in range(n_trials):
+            bp_task = self._bandpower_envelope(task_keys[i], band=band, picks=picks)[: self.nEpochs]
+            bp_rest = self._bandpower_envelope(rest_keys[i], band=band, picks=picks)[: self.nEpochs]
+            if bp_task.size == self.nEpochs and bp_rest.size == self.nEpochs:
+                task_mat.append(bp_task)
+                rest_mat.append(bp_rest)
+
+        task_mat = np.asarray(task_mat, dtype=float)
+        rest_mat = np.asarray(rest_mat, dtype=float)
+        if task_mat.size == 0:
+            raise RuntimeError("No usable trials after filtering/truncation")
+
+        rel_trials = 100.0 * (task_mat - rest_mat) / (rest_mat + 1e-12)
+        rel = np.mean(rel_trials, axis=0)
+        lo, hi = np.percentile(rel_trials, [(100 - ci) / 2.0, 100 - (100 - ci) / 2.0], axis=0)
+
+        return {
+            "time_sec": t,
+            "mean_pct": rel,
+            "ci_low": lo,
+            "ci_high": hi,
+            "n_trials": int(rel_trials.shape[0]),
+            "roi": roi,
+            "band": band,
+            "task": task_prefix,
+            "rest": rest_prefix,
+        }
+
     def _plot_within_trial_bandpower(
         self,
         task_prefix: str,
@@ -2510,66 +3347,18 @@ class EEGMotorImagery:
         ci: float = 95.0,
         figsize: Tuple[float, float] = (10.0, 4.0),
     ) -> Figure:
-        """
-        Plot within-trial bandpower across epoch segments, with a CI across trials
-
-        roi:
-        - "contra": contralateral motor channels
-        - "ipsi": ipsilateral motor channels (via montage symmetry)
-        - "both": both hemispheres (all MI channels)
-        """
-        if not hasattr(self, "epochs_dict"):
-            raise RuntimeError("No epochs_dict. Run _generate_epochs() first")
-
-        # Decide contralateral hemisphere from task
-        task_prefix_l = task_prefix.lower().rstrip("_")
-        contra_set    = set([c.lower() for c in (self.chRight if task_prefix_l.startswith("left") else self.chLeft)])
-        ipsi_set      = set([c.lower() for c in (self.chLeft if task_prefix_l.startswith("left") else self.chRight)])
-        both_set      = set([c.lower() for c in self.ch_motor_imagery])
-
-        if roi == "contra": picks = self._resolve_picks_from_names(list(contra_set))
-        elif roi == "ipsi": picks = self._resolve_picks_from_names(list(ipsi_set  ))
-        else:               picks = self._resolve_picks_from_names(list(both_set  ))
-
-        task_keys = self._trial_keys_for_prefix(task_prefix)
-        rest_keys = self._trial_keys_for_prefix(rest_prefix)
-        n_trials = min(len(task_keys), len(rest_keys))
-        if n_trials == 0:
-            raise RuntimeError(f"No trials found for {task_prefix=} or {rest_prefix=}")
-
-        # Each key contains nEpochs epochs (segments). We will average within each segment index across trials.
-        delta = (self.duration_task - self.skip) / float(self.nEpochs)
-        t = np.arange(self.nEpochs) * delta + (delta / 2.0)
-
-        task_mat = []
-        rest_mat = []
-
-        for i in range(n_trials):
-            # Bandpower per segment (epoch) in that trial
-            bp_task = self._bandpower_envelope(task_keys[i], band=band, picks=picks)
-            bp_rest = self._bandpower_envelope(rest_keys[i], band=band, picks=picks)
-
-            # Defensive: if something weird happened, truncate to nEpochs
-            bp_task = bp_task[: self.nEpochs]
-            bp_rest = bp_rest[: self.nEpochs]
-
-            if bp_task.size == self.nEpochs and bp_rest.size == self.nEpochs:
-                task_mat.append(bp_task)
-                rest_mat.append(bp_rest)
-
-        task_mat = np.asarray(task_mat, dtype=float)  # (n_trials, nEpochs)
-        rest_mat = np.asarray(rest_mat, dtype=float)
-
-        if task_mat.size == 0:
-            raise RuntimeError("No usable trials after filtering/truncation.")
-
-        # ERD/ERS style: percent change relative to rest
-        denom = np.mean(rest_mat, axis=0) + 1e-12
-        rel = 100.0 * (np.mean(task_mat, axis=0) - np.mean(rest_mat, axis=0)) / denom
-
-        # CI across trials on the relative metric (simple percentile across trial means)
-        rel_trials = 100.0 * (task_mat - rest_mat) / (rest_mat + 1e-12)
-        lo, hi = np.percentile(rel_trials, [(100 - ci) / 2.0, 100 - (100 - ci) / 2.0], axis=0)
+        """Plot ERD/ERS-style relative bandpower across within-trial segments"""
+        curve = self._compute_within_trial_erd_ers(
+            task_prefix=task_prefix,
+            rest_prefix=rest_prefix,
+            band=band,
+            roi=roi,
+            ci=ci,
+        )
+        t = curve["time_sec"]
+        rel = curve["mean_pct"]
+        lo = curve["ci_low"]
+        hi = curve["ci_high"]
 
         fig, ax = plt.subplots(1, 1, figsize=figsize)
         ax.plot(t, rel, marker="o")
@@ -2577,20 +3366,87 @@ class EEGMotorImagery:
         ax.axhline(0.0, linestyle="--", linewidth=1)
 
         ax.set_xlabel("Time within trial [s]")
-        ax.set_ylabel("Relative change vs rest [%]")
-        ax.set_title(f"{task_prefix} vs {rest_prefix} | {band[0]:g}-{band[1]:g} Hz | ROI={roi}", loc="left")
+        ax.set_ylabel("ERD/ERS vs rest [%]")
+        ax.set_title(
+            f"{task_prefix} vs {rest_prefix} | {band[0]:g}-{band[1]:g} Hz | ROI={roi} | n={curve['n_trials']}",
+            loc="left",
+        )
         ax.grid(True, linestyle=":", alpha=0.4)
         fig.tight_layout()
 
         if self.save_path is not None:
-            fname = f"within_trial_{task_prefix}_{band[0]:g}-{band[1]:g}Hz_{roi}.png".replace(" ", "")
-            fig.savefig(os.path.join(self.save_path, fname), bbox_inches="tight")
+            basename = f"erd_ers_{task_prefix}_{band[0]:g}-{band[1]:g}Hz_{roi}".replace(" ", "")
+            self._savefig(fig, basename)
 
         return fig, ax
 
 
 
+
     # 4) Laterality index over time (the thing reviewers love)
+    def _plot_within_trial_bandpower_overlay_rois(
+        self,
+        task_prefix: str,
+        rest_prefix: str,
+        band: Tuple[float, float],
+        ci: float = 95.0,
+        figsize: Tuple[float, float] = (10.0, 4.6),
+    ) -> Figure:
+        """Plot contra and ipsi ERD/ERS curves on the same task-vs-rest axis"""
+        curves = {
+            roi: self._compute_within_trial_erd_ers(
+                task_prefix=task_prefix,
+                rest_prefix=rest_prefix,
+                band=band,
+                roi=roi,
+                ci=ci,
+            )
+            for roi in ("contra", "ipsi")
+        }
+
+        fig, ax = plt.subplots(1, 1, figsize=figsize)
+        style = {
+            "contra": {"color": "tab:blue", "label": "Contralateral ROI"},
+            "ipsi": {"color": "tab:orange", "label": "Ipsilateral ROI"},
+        }
+
+        for roi, curve in curves.items():
+            t = curve["time_sec"]
+            rel = curve["mean_pct"]
+            lo = curve["ci_low"]
+            hi = curve["ci_high"]
+            color = style[roi]["color"]
+            ax.plot(t, rel, marker="o", color=color, label=f"{style[roi]['label']} mean")
+            ax.fill_between(t, lo, hi, color=color, alpha=0.16, label=f"{style[roi]['label']} {ci:g}% CI")
+
+        ax.axhline(0.0, linestyle="--", linewidth=1, color="0.3")
+        ax.set_xlabel("Time within trial [s]")
+        ax.set_ylabel("Bandpower change vs matched rest [%]")
+        ax.set_title(
+            f"Task-vs-rest ERD/ERS overlay | {task_prefix} | {band[0]:g}-{band[1]:g} Hz",
+            loc="left",
+        )
+        ax.text(
+            0.01,
+            0.04,
+            "Negative values indicate ERD/suppression relative to rest; positive values indicate ERS/increase\nContra and ipsi are shown together to expose hemispheric asymmetry",
+            transform=ax.transAxes,
+            ha="left",
+            va="bottom",
+            fontsize=8,
+        )
+        ax.grid(True, linestyle=":", alpha=0.4)
+        ax.legend(frameon=False, fontsize=8, ncols=2, loc="upper right")
+        fig.tight_layout()
+
+        if self.save_path is not None:
+            basename = f"erd_ers_{task_prefix}_{band[0]:g}-{band[1]:g}Hz_contra_ipsi".replace(" ", "")
+            self._savefig(fig, basename)
+
+        return fig, ax
+
+
+
     def _plot_within_trial_laterality_index(
         self,
         task_prefix: str,
@@ -2650,8 +3506,8 @@ class EEGMotorImagery:
         fig.tight_layout()
 
         if self.save_path is not None:
-            fname = f"laterality_{task_prefix}_{band[0]:g}-{band[1]:g}Hz.png".replace(" ", "")
-            fig.savefig(os.path.join(self.save_path, fname), bbox_inches="tight")
+            basename = f"laterality_{task_prefix}_{band[0]:g}-{band[1]:g}Hz".replace(" ", "")
+            self._savefig(fig, basename, formats=("png",))
 
         return fig, ax
 
