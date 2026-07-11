@@ -1417,8 +1417,12 @@ def plot_best_fit_for_channel(
 
         alpha_mu = round(sub["alpha_mu_hz"].iloc[0], 2)
         alpha_var = round(sub["alpha_sigma_hz"].iloc[0]**2, 2)
+        alpha_amp = round(sub["alpha_amp_db"].iloc[0], 1)
+
         beta_mu = round(sub["beta_mu_hz"].iloc[0], 2)
         beta_var = round(sub["beta_sigma_hz"].iloc[0]**2, 2)
+        beta_amp = round(sub["beta_amp_db"].iloc[0], 1)
+
 
         peak_report = format_gaussian_peak_report(sub)
 
@@ -1495,7 +1499,7 @@ def plot_best_fit_for_channel(
                 linestyle=":",
                 linewidth=1,
                 color='red',
-                label=f"Alpha peak: N ~ ({alpha_mu:.2f}, {alpha_var})",
+                label=f"Alpha peak ({alpha_amp}): N ~ ({alpha_mu:.2f}, {alpha_var})",
             )
             ax_bottom.axvline(
                 alpha_mu,
@@ -1510,7 +1514,7 @@ def plot_best_fit_for_channel(
                 linestyle=":",
                 linewidth=1,
                 color='blue',
-                label=f"Beta peak: N ~ ({beta_mu:.2f}, {beta_var})",
+                label=f"Beta peak ({beta_amp}): N ~ ({beta_mu:.2f}, {beta_var})",
             )
             ax_bottom.axvline(
                 beta_mu,
@@ -1797,7 +1801,8 @@ if __name__ == "__main__":
     input_filename = "psd_long_format.csv"
 
     # Use a list to plot specific channels
-    plot_channels = ["c1", "c3", "cp1", "c2", "c4", "cp2"]
+    #plot_channels = ["c1", "c3", "cp1", "c2", "c4", "cp2"]
+    plot_channels = ["c3", "c4"]
 
     # Use None to plot all available channels
     # plot_channels = None
