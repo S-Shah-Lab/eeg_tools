@@ -308,9 +308,12 @@ def run_pipeline(args: argparse.Namespace) -> tuple[mne.io.BaseRaw, dict[str, An
     raw = importer.raw
     ch_set = importer.ch_set
     montage_type = _safe_montage_type(importer, args.montage_type)
+    aux_source_channels = list(getattr(importer, "montage", {}).get("aux_source_channels", []))
     config = _build_config(args)
     _print_raw_summary(raw, "\nImported raw summary", quiet=args.quiet)
     _echo(f"  Montage type    : {montage_type or 'unknown'}", quiet=args.quiet)
+    if aux_source_channels:
+        _echo(f"  Dropped source  : {_format_list(aux_source_channels)}", quiet=args.quiet)
 
     preprocessor = EEGPreprocessor(
         raw,
@@ -358,6 +361,7 @@ def run_pipeline(args: argparse.Namespace) -> tuple[mne.io.BaseRaw, dict[str, An
             "source_file": str(file_path),
             "montage_type": montage_type,
             "date_test": getattr(importer, "stream", {}).get("date_test", "N/A"),
+            "dropped_source_channels": aux_source_channels,
             "n_channels": int(raw_out.info["nchan"]),
             "sfreq": float(raw_out.info["sfreq"]),
             "preprocessing_history": history,

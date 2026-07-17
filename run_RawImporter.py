@@ -81,6 +81,9 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Original shape      : {importer.stream.get('signal').shape}")
     print(f"Duration            : {importer.stream.get('duration_sec'):.2f} s")
     print(f"Montage type        : {importer.montage.get('montage_type')}")
+    aux_source_channels = importer.montage.get("aux_source_channels", [])
+    if aux_source_channels:
+        print(f"Dropped source rows : {', '.join(aux_source_channels)}")
     print(f"Raw channels        : {len(raw.ch_names)}")
     print(f"Raw samples         : {raw.n_times}")
     print(f"Stim channels       : {'kept' if args.keep_stim else 'skipped'}")

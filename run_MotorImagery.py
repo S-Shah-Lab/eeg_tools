@@ -446,8 +446,11 @@ def main(argv: list[str] | None = None) -> None:
         ch_set = imp.ch_set
         montage_type = args.montage_type or imp.montage.get("montage_type")
         date_test = imp.stream.get("date_test") or "N/A"
+        aux_source_channels = list(imp.montage.get("aux_source_channels", []))
 
         _detail("Montage", montage_type or "N/A")
+        if aux_source_channels:
+            _detail("Dropped source rows", ", ".join(aux_source_channels))
         _detail("Date", date_test)
         _detail("Output folder", save_path)
         _detail("Images folder", images_path)
@@ -500,6 +503,7 @@ def main(argv: list[str] | None = None) -> None:
                     "source_file": str(input_path),
                     "montage_type": montage_type,
                     "date_test": date_test,
+                    "dropped_source_channels": aux_source_channels,
                     "n_channels": int(raw.info["nchan"]),
                     "sfreq": float(raw.info["sfreq"]),
                     "preprocessing_history": history,

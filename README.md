@@ -324,6 +324,10 @@ MotorImageryPdfReport(
 - Input is a **BCI2000 `.dat`** file readable by `BCI2000Tools.FileReader.bcistream`
 - Montages are inferred via helper files, unless overridden in the CLI using `--montage-type`
 - Some workflows may include stimulus/state channels; use `--keep-stim` if you need them
+- EGI files may contain 128 HydroCel source rows plus appended auxiliary acquisition rows
+  such as `PIB1_001`. The importer now drops those non-EEG source rows before EGI
+  montage inference, while still preserving BCI2000 state channels when `--keep-stim`
+  is enabled.
 
 ---
 

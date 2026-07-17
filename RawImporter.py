@@ -23,6 +23,7 @@ import helper.eeg_dict as eeg_dict
 
 SUPPORTED_EXTENSIONS = {".dat"}
 DSI_AUX_CHANNELS = {"X1", "X2", "X3", "TRG"}
+EGI_SOURCE_CHANNEL_COUNT = 128
 EGI_FLAT_STD_THRESHOLD = 0.01
 EGI_64_MIN_FLAT_CHANNELS = 20
 MICROVOLTS_TO_VOLTS = 1e-6
@@ -109,6 +110,57 @@ class EEGRawImporter:
         tried = "\n  - ".join(str(path) for path in tried_paths)
         raise FileNotFoundError(f"Could not locate helper file '{file_name}'. Tried:\n  - {tried}")
 
+    @staticmethod
+    def _is_egi_source_name(ch_name: str, expected_index: int) -> bool:
+        """Return True when a source label matches EGI E1..E128 or generic Ch1..Ch128 order."""
+        normalized = str(ch_name).strip().lower()
+        for prefix in ("e", "ch"):
+            if not normalized.startswith(prefix):
+                continue
+            suffix = normalized[len(prefix):]
+            if suffix.isdigit() and int(suffix) == expected_index:
+                return True
+        return False
+
+    @classmethod
+    def _has_egi_128_prefix(cls, ch_names: list[str]) -> bool:
+        """Return True when the first 128 source labels look like ordered EGI electrodes."""
+        if len(ch_names) < EGI_SOURCE_CHANNEL_COUNT:
+            return False
+        return all(
+            cls._is_egi_source_name(ch_names[idx], idx + 1)
+            for idx in range(EGI_SOURCE_CHANNEL_COUNT)
+        )
+
+    def _get_egi_source_view(self, signal: np.ndarray, ch_names: list[str]) -> dict[str, Any] | None:
+        """
+        Return the EEG-only 128-row EGI source block, dropping appended aux rows.
+
+        Some EGI BCI2000 files store the 128 HydroCel source rows followed by
+        auxiliary rows such as PIB1_001. Those rows are useful acquisition
+        channels but are not part of the EGI montage files used here.
+        """
+        if signal.shape[0] == EGI_SOURCE_CHANNEL_COUNT:
+            return {
+                "signal": signal,
+                "ch_names": ch_names,
+                "aux_source_channels": [],
+            }
+
+        if self._has_egi_128_prefix(ch_names):
+            aux_source_channels = list(ch_names[EGI_SOURCE_CHANNEL_COUNT:])
+            self._log(
+                "Dropping appended non-EEG source channel(s) before EGI montage inference: "
+                f"{', '.join(aux_source_channels)}"
+            )
+            return {
+                "signal": signal[:EGI_SOURCE_CHANNEL_COUNT],
+                "ch_names": ch_names[:EGI_SOURCE_CHANNEL_COUNT],
+                "aux_source_channels": aux_source_channels,
+            }
+
+        return None
+
     def _resolve_montage(self) -> dict[str, Any]:
         """Infer montage type and associated location file from channel count and names"""
         n_channels = int(self.stream["n_channels"])
@@ -136,14 +188,17 @@ class EEGRawImporter:
                 "ch_names": ch_names,
             }
 
-        if n_channels == 128:
-            stds = np.std(signal, axis=1)
+        egi_source = self._get_egi_source_view(signal, ch_names)
+        if egi_source is not None:
+            egi_signal = np.asarray(egi_source["signal"], dtype=float)
+            egi_ch_names = list(egi_source["ch_names"])
+            stds = np.std(egi_signal, axis=1)
             n_flat_channels = int(np.sum(stds < EGI_FLAT_STD_THRESHOLD))
             is_egi_64 = n_flat_channels >= EGI_64_MIN_FLAT_CHANNELS
 
             self._log(
                 f"Detected {n_flat_channels} nearly-flat channel(s) "
-                f"below std<{EGI_FLAT_STD_THRESHOLD}",
+                f"below std<{EGI_FLAT_STD_THRESHOLD} in the 128 EGI source rows",
                 verbose_only=True,
             )
 
@@ -152,20 +207,24 @@ class EEGRawImporter:
                 return {
                     "montage_type": "EGI_64",
                     "ch_info": self._resolve_path("EGI64_location.txt"),
-                    "signal": signal[keep_idx],
-                    "ch_names": list(np.asarray(ch_names)[keep_idx]),
+                    "signal": egi_signal[keep_idx],
+                    "ch_names": list(np.asarray(egi_ch_names)[keep_idx]),
+                    "aux_source_channels": egi_source["aux_source_channels"],
                 }
 
             return {
                 "montage_type": "EGI_128",
                 "ch_info": self._resolve_path("EGI128_location.txt"),
-                "signal": signal,
-                "ch_names": ch_names,
+                "signal": egi_signal,
+                "ch_names": egi_ch_names,
+                "aux_source_channels": egi_source["aux_source_channels"],
             }
 
         raise ValueError(
-            f"Unknown montage with {n_channels} channels. "
-            "Supported layouts are DSI 24, GTEC 32, EGI 64, and EGI 128"
+            f"Unknown montage with {n_channels} source channel(s). "
+            "Supported layouts are DSI 24, GTEC 32, EGI 64, and EGI 128. "
+            "For EGI files with appended auxiliary source rows, the first 128 rows "
+            "must be labeled E1..E128 or Ch1..Ch128."
         )
 
     @staticmethod
