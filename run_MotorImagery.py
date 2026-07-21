@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 from pathlib import Path
 from typing import Any, List
 
@@ -55,6 +56,26 @@ def _stage(index: int, total: int, title: str) -> None:
 def _detail(label: str, value: object) -> None:
     """Print a compact indented key/value message"""
     print(f"      {label}: {value}")
+
+
+def _parse_optional_channel_list(text: str | None) -> list[str] | bool:
+    """Parse a comma-separated channel list, or false/none to disable fit plots"""
+    if text is None:
+        return ["c3", "c4"]
+    normalized = str(text).strip()
+    if normalized.lower() in {"false", "off", "none", "no"}:
+        return False
+    channels = [item.strip().lower() for item in normalized.split(",") if item.strip()]
+    return channels or False
+
+
+def _copy_optional_report_assets(source_images: Path, target_images: Path) -> None:
+    """Copy QC assets that are shared by the raw-power and 1/f-subtracted reports"""
+    for filename in ("bridged_candidates.png", "bridged_candidates.svg", "bridged_candidate_groups.csv"):
+        source = source_images / filename
+        if source.is_file():
+            target_images.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target_images / filename)
 
 
 def _format_step_names(config: EEGPreprocessorConfig) -> str:
@@ -270,6 +291,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--analysis-verbose", action="store_true", help="Verbose motor imagery analysis output")
     parser.add_argument("--analysis-random-state", type=int, default=83092, help="Random seed for motor imagery statistics and decoding")
     parser.add_argument("--skip-decoding", action="store_true", help="Skip optional task-vs-rest decoding analysis")
+    parser.add_argument(
+        "--skip-one-over-f-report",
+        action="store_true",
+        help="Skip the second report based on selected-model 1/f background subtraction",
+    )
+    parser.add_argument(
+        "--one-over-f-plot-channels",
+        default="c3,c4",
+        help="Comma-separated channels for best-fit diagnostic plots, or 'false' to disable",
+    )
 
     parser.add_argument("--skip-report", action="store_true", help="Skip PDF report generation")
     parser.add_argument("--skip-csv", action="store_true", help="Skip CSV export (PSD per bin + signed r² per band)")
@@ -384,11 +415,19 @@ def main(argv: list[str] | None = None) -> None:
     save_path = output_root / output_name
     images_path = save_path / "images"
     csv_path = save_path / "csv"
+    one_over_f_save_path = save_path / "one_over_f_subtracted"
+    one_over_f_images_path = one_over_f_save_path / "images"
+    one_over_f_csv_path = one_over_f_save_path / "csv"
+    run_one_over_f = (not args.skip_analysis) and (not args.skip_one_over_f_report)
 
     _ensure_dir(save_path)
     _ensure_dir(images_path)
     if not args.skip_csv:
         _ensure_dir(csv_path)
+    if run_one_over_f:
+        _ensure_dir(one_over_f_save_path)
+        _ensure_dir(one_over_f_images_path)
+        _ensure_dir(one_over_f_csv_path)
 
     stages = []
     if use_cleaned_input:
@@ -401,8 +440,10 @@ def main(argv: list[str] | None = None) -> None:
             stages.append("Running preprocessing")
     if not args.skip_analysis:
         stages.append("Running motor imagery analysis")
+        if run_one_over_f:
+            stages.append("Running 1/f-subtracted motor imagery analysis")
     if not args.skip_report:
-        stages.append("Building PDF report")
+        stages.append("Building PDF report(s)" if run_one_over_f else "Building PDF report")
 
     total = len(stages)
     stage_i = 1
@@ -413,6 +454,8 @@ def main(argv: list[str] | None = None) -> None:
     _detail("Images", images_path)
     if not args.skip_csv:
         _detail("CSV", csv_path)
+    if run_one_over_f:
+        _detail("1/f output", one_over_f_save_path)
     _detail("Helper", helper_dir)
     _detail("Simulations", args.n_sim)
 
@@ -543,8 +586,35 @@ def main(argv: list[str] | None = None) -> None:
             run_decoding=not args.skip_decoding,
         )
 
+        if run_one_over_f:
+            _stage(stage_i, total, "Running 1/f-subtracted motor imagery analysis")
+            stage_i += 1
+            _detail("Output", one_over_f_save_path)
+            _detail("PSD scheme", "subtract selected 1/f background in dB")
+            _detail("Fit diagnostics", args.one_over_f_plot_channels)
+            EEGMotorImagery(
+                raw,
+                ch_set,
+                nEpochs=args.n_epochs,
+                duration_task=args.duration_task,
+                skip=args.skip_sec,
+                resolution=args.resolution,
+                freq_bands=args.freq_bands,
+                nSim=args.n_sim,
+                strict=args.strict,
+                copy=True,
+                verbose=args.analysis_verbose,
+                save_path=str(one_over_f_save_path),
+                export_csv=not args.skip_csv,
+                random_state=args.analysis_random_state,
+                run_decoding=not args.skip_decoding,
+                psd_processing="one_over_f_subtracted",
+                background_fit_plot_channels=_parse_optional_channel_list(args.one_over_f_plot_channels),
+            )
+            _copy_optional_report_assets(images_path, one_over_f_images_path)
+
     if not args.skip_report:
-        _stage(stage_i, total, "Building PDF report")
+        _stage(stage_i, total, "Building PDF report(s)" if run_one_over_f else "Building PDF report")
         MotorImageryPdfReport(
             plot_folder=str(images_path),
             helper_folder=str(helper_dir),
@@ -553,7 +623,21 @@ def main(argv: list[str] | None = None) -> None:
             resolution=int(args.resolution),
             age_at_test=str(args.age_at_test),
             save_folder=str(save_path),
+            report_title="Command Following Report",
+            report_name=output_name,
         )
+        if run_one_over_f:
+            MotorImageryPdfReport(
+                plot_folder=str(one_over_f_images_path),
+                helper_folder=str(helper_dir),
+                date_test=date_test or "N/A",
+                montage_name=montage_type or "N/A",
+                resolution=int(args.resolution),
+                age_at_test=str(args.age_at_test),
+                save_folder=str(one_over_f_save_path),
+                report_title="Command Following Report (1/f-subtracted PSD)",
+                report_name=output_name,
+            )
 
     print("\nPipeline complete")
     _detail("Input", input_path)
@@ -561,6 +645,11 @@ def main(argv: list[str] | None = None) -> None:
     _detail("Images folder", images_path)
     if not args.skip_csv:
         _detail("CSV folder", csv_path)
+    if run_one_over_f:
+        _detail("1/f output folder", one_over_f_save_path)
+        _detail("1/f images folder", one_over_f_images_path)
+        if not args.skip_csv:
+            _detail("1/f CSV folder", one_over_f_csv_path)
 
 
 if __name__ == "__main__":

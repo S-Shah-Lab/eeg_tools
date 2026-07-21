@@ -49,19 +49,22 @@ class MotorImageryPdfReport:
         save_folder: Optional[PathLike] = None,
         verbose: bool = True,
         auto_generate: bool = True,
+        report_title: str = "Command Following Report",
+        report_name: Optional[str] = None,
     ) -> None:
         """Initialize report paths and metadata used to assemble the PDF"""
         self.plot_folder = Path(plot_folder).expanduser()
         self.helper_folder = Path(helper_folder).expanduser()
         self.save_folder = Path(save_folder).expanduser() if save_folder else self.plot_folder
         self.verbose = verbose
+        self.report_title = report_title
 
         self.show_all_lines = False
         self.show_all_points = False
 
         self.formatted_date = date.today().strftime("%Y-%m-%d")
         self.version = "N/A"
-        self.base_name = self.plot_folder.name
+        self.base_name = report_name or self._infer_report_name(self.plot_folder, self.save_folder)
         self.sub_name, self.ses_name = self._parse_subject_session(self.base_name)
 
         self.date_test = date_test
@@ -126,6 +129,18 @@ class MotorImageryPdfReport:
     # Metadata and validation
     # ------------------------------------------------------------------
     @staticmethod
+    def _infer_report_name(plot_folder: Path, save_folder: Path) -> str:
+        """Infer the subject/run folder name for legacy callers."""
+        if plot_folder.name.lower() == "images":
+            if save_folder.name.lower() == "one_over_f_subtracted" and save_folder.parent.name:
+                return save_folder.parent.name
+            if save_folder.name:
+                return save_folder.name
+            if plot_folder.parent.name:
+                return plot_folder.parent.name
+        return plot_folder.name
+
+    @staticmethod
     def _parse_subject_session(base_name: str) -> Tuple[str, str]:
         """Extract subject and session from a BIDS-like folder name"""
         subject = "N/A"
@@ -177,6 +192,14 @@ class MotorImageryPdfReport:
         """Write metadata about the PDF generation process"""
         payload = {
             "output_pdf": str(self.output_path),
+            "report_title": self.report_title,
+            "report_name": self.base_name,
+            "subject": self.sub_name,
+            "session": self.ses_name,
+            "date_test": self.date_test,
+            "montage": self.montage_name,
+            "age_at_test": self.age_at_test,
+            "condition": self.condition,
             "source_plot_folder": str(self.plot_folder),
             "figures_drawn": [path.name for path in self.drawn_files],
             "missing_optional_files": [path.name for path in self.missing_files],
@@ -624,7 +647,7 @@ class MotorImageryPdfReport:
         dx = 10
 
         self._write_text(
-            ["Command Following Report"],
+            [self.report_title],
             self.canvas_dim["xmid"],
             self.move_down_by(self.dict_alph["I"][1], y0),
             font_size=17,

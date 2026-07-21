@@ -6,7 +6,7 @@ Provides epoching, spectral feature computation, statistical testing, and report
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import csv
 import hashlib
@@ -48,6 +48,9 @@ class EEGMotorImagery:
         auto_run: bool = True,
         random_state: Optional[int] = 83092,
         run_decoding: bool = True,
+        psd_processing: str = "power",
+        background_fit_kwargs: Optional[Dict[str, Any]] = None,
+        background_fit_plot_channels: Optional[Union[List[str], bool]] = None,
     ) -> None:
 
         # Work on a copy if requested
@@ -68,6 +71,17 @@ class EEGMotorImagery:
         self.export_csv    = export_csv
         self.random_state  = random_state
         self.run_decoding  = run_decoding
+        self.psd_processing = self._normalize_psd_processing(psd_processing)
+        self.background_fit_kwargs = dict(background_fit_kwargs or {})
+        self.background_fit_plot_channels = background_fit_plot_channels
+        self.psd_values_are_db = self.psd_processing == "one_over_f_subtracted"
+        self.psd_value_units = "dB" if self.psd_values_are_db else "power"
+        self.psd_value_label = (
+            "1/f-subtracted PSD residual (dB)"
+            if self.psd_values_are_db
+            else "Welch PSD power"
+        )
+        self.background_fit_outputs: Dict[str, Any] = {}
         self._rng_master   = np.random.default_rng(random_state)
         self.generated_figures: List[str] = []
         self.exported_files: List[str] = []
@@ -105,6 +119,52 @@ class EEGMotorImagery:
         """Print a warning message"""
         self.analysis_warnings.append(str(message))
         print(f"[motor-imagery warning] {message}")
+
+    @staticmethod
+    def _normalize_psd_processing(value: str) -> str:
+        """Normalize the PSD processing mode used downstream by stats and plots"""
+        normalized = str(value or "power").strip().lower().replace("-", "_")
+        aliases = {
+            "raw": "power",
+            "raw_power": "power",
+            "welch": "power",
+            "welch_power": "power",
+            "1f": "one_over_f_subtracted",
+            "1_over_f": "one_over_f_subtracted",
+            "1_over_f_subtracted": "one_over_f_subtracted",
+            "one_over_f": "one_over_f_subtracted",
+            "one_over_f_subtraction": "one_over_f_subtracted",
+            "one_over_f_subtracted": "one_over_f_subtracted",
+            "background_removed": "one_over_f_subtracted",
+            "background_subtracted": "one_over_f_subtracted",
+        }
+        normalized = aliases.get(normalized, normalized)
+        if normalized not in {"power", "one_over_f_subtracted"}:
+            raise ValueError(
+                "psd_processing must be 'power' or 'one_over_f_subtracted', "
+                f"got {value!r}"
+            )
+        return normalized
+
+    @staticmethod
+    def _power_to_db(power: np.ndarray) -> np.ndarray:
+        """Convert PSD power to dB using the convention used by the existing pipeline"""
+        power = np.asarray(power, dtype=float)
+        safe_power = np.maximum(power, np.finfo(float).tiny)
+        return 10.0 * np.log10(safe_power * 1e12)
+
+    def _psd_values_for_analysis(self, values: np.ndarray) -> np.ndarray:
+        """Return PSD values in the units used for effects, decoding, and plots"""
+        values = np.asarray(values, dtype=float)
+        if self.psd_values_are_db:
+            return values
+        return self._power_to_db(values)
+
+    def _psd_axis_label(self) -> str:
+        """Return a display label for PSD-valued axes"""
+        if self.psd_values_are_db:
+            return "1/f-subtracted PSD residual [dB]"
+        return "PSD [dB]"
 
     def _rng_for(self, label: str) -> np.random.Generator:
         """Create a deterministic RNG for a named analysis component"""
@@ -179,6 +239,9 @@ class EEGMotorImagery:
 
         self._info("Computing PSDs")
         self._generate_psds()
+        if self.psd_processing == "one_over_f_subtracted":
+            self._info("Applying 1/f background subtraction")
+            self._apply_one_over_f_background_subtraction()
 
         self._info("Finding left and right motor channels")
         self._grab_left_right_electrodes()
@@ -433,6 +496,9 @@ class EEGMotorImagery:
             "strict_channel_set": bool(self.strict),
             "random_state": self.random_state,
             "run_decoding": bool(self.run_decoding),
+            "psd_processing": self.psd_processing,
+            "psd_value_units": self.psd_value_units,
+            "psd_value_label": self.psd_value_label,
             "sfreq": float(self.raw.info.get("sfreq", np.nan)),
             "highpass": float(self.raw.info.get("highpass", np.nan) or 0.0),
             "lowpass": float(self.raw.info.get("lowpass", np.nan) or 0.0),
@@ -811,6 +877,221 @@ class EEGMotorImagery:
 
         self.psds_dict = psds_dict
         self.psds_epochs_dict = psds_epochs_dict
+        self.psds_power_dict = {key: np.asarray(value, dtype=float).copy() for key, value in psds_dict.items()}
+        self.psds_power_epochs_dict = {
+            key: np.asarray(value, dtype=float).copy()
+            for key, value in psds_epochs_dict.items()
+        }
+
+    def _channel_labels_for_psd(self, n_channels: int) -> List[str]:
+        """Return channel labels aligned to PSD channel rows"""
+        labels = [str(label).lower() for label in self.ch_set.get_labels()]
+        if len(labels) < n_channels:
+            labels = [str(name).lower() for name in self.raw.info.get("ch_names", [])]
+        if len(labels) < n_channels:
+            raise RuntimeError(
+                f"Only {len(labels)} channel labels are available for {n_channels} PSD rows"
+            )
+        return labels[:n_channels]
+
+    def _write_background_fit_input_csv(self) -> str:
+        """Write all-channel PSD dB values used by the 1/f background-fit helper"""
+        try:
+            import pandas as pd
+        except Exception as exc:
+            raise RuntimeError(f"pandas is required for 1/f background subtraction: {exc}") from exc
+
+        if not hasattr(self, "psds_power_dict") or not self.psds_power_dict:
+            raise RuntimeError("Raw power PSD cache missing; cannot fit 1/f background")
+
+        freqs = np.asarray(getattr(self, "freqs", []), dtype=float)
+        if freqs.size == 0:
+            raise RuntimeError("Frequency bins are unavailable; cannot fit 1/f background")
+
+        first_psd = np.asarray(next(iter(self.psds_power_dict.values())), dtype=float)
+        n_channels, n_bins = first_psd.shape
+        if freqs.size != n_bins:
+            raise RuntimeError(
+                f"PSD frequency vector length ({freqs.size}) does not match PSD bins ({n_bins})"
+            )
+
+        labels = self._channel_labels_for_psd(n_channels)
+        rows: List[Dict[str, Any]] = []
+
+        for batch, psd_power in self.psds_power_dict.items():
+            psd_power = np.asarray(psd_power, dtype=float)
+            if psd_power.shape != (n_channels, n_bins):
+                raise RuntimeError(
+                    f"PSD shape for batch '{batch}' is {psd_power.shape}, expected {(n_channels, n_bins)}"
+                )
+            psd_db = self._power_to_db(psd_power)
+            condition = self._condition_from_epoch_key(batch)
+            for ch_idx, channel in enumerate(labels):
+                for f_idx, freq in enumerate(freqs):
+                    rows.append({
+                        "batch": batch,
+                        "condition": condition,
+                        "channel": channel,
+                        "frequency_hz": float(freq),
+                        "psd_power": float(psd_power[ch_idx, f_idx]),
+                        "psd_db": float(psd_db[ch_idx, f_idx]),
+                    })
+
+        csv_dir = self._output_subdir("csv")
+        if csv_dir is None:
+            raise RuntimeError("A save_path is required for 1/f background subtraction")
+
+        path = os.path.join(csv_dir, "psd_long_format_1overf_background_input.csv")
+        pd.DataFrame(rows).to_csv(path, index=False)
+        self._track_export(path)
+        return path
+
+    def _fit_one_over_f_background(self, input_csv: str) -> Dict[str, Any]:
+        """Run the provided aggregate PSD background-fit pipeline"""
+        try:
+            from MotorImagery_aggregate_psds_fit_background import process_psd_file
+        except Exception as exc:
+            raise RuntimeError(
+                "Could not import MotorImagery_aggregate_psds_fit_background.py "
+                f"for 1/f background subtraction: {exc}"
+            ) from exc
+
+        plot_channels = self.background_fit_plot_channels
+        if plot_channels is None:
+            plot_channels = ["c3", "c4"]
+
+        fit_kwargs = {
+            "output_aggregated_csv": "psd_long_format_1overf_aggregated.csv",
+            "output_best_fit_csv": "psd_long_format_1overf_aggregated_best_fit.csv",
+            "output_fit_summary_csv": "psd_1overf_fit_summary_all_models.csv",
+            "output_peak_summary_csv": "psd_1overf_selected_gaussian_peak_summary.csv",
+            "output_peak_group_summary_csv": "psd_1overf_selected_gaussian_peak_group_summary.csv",
+            "plot_channels": plot_channels,
+            "plot_condition": None,
+            "plot_folder_name": "psd_1overf_best_fit_plots",
+        }
+        fit_kwargs.update(self.background_fit_kwargs)
+        return process_psd_file(input_csv=input_csv, **fit_kwargs)
+
+    def _background_lookup_from_best_fit(self, best_fit_df: Any, labels: List[str]) -> Dict[str, np.ndarray]:
+        """Create condition/channel background arrays aligned to self.freqs"""
+        freqs = np.asarray(getattr(self, "freqs", []), dtype=float)
+        lookup: Dict[str, np.ndarray] = {}
+
+        for (condition, channel), sub in best_fit_df.groupby(["condition", "channel"], sort=False):
+            sub = sub.sort_values("frequency_hz")
+            sub_freqs = sub["frequency_hz"].to_numpy(dtype=float)
+            background = sub["selected_background_1overf_db"].to_numpy(dtype=float)
+
+            if sub_freqs.size != freqs.size or not np.allclose(sub_freqs, freqs):
+                background = np.interp(freqs, sub_freqs, background, left=np.nan, right=np.nan)
+
+            lookup[f"{str(condition).lower()}::{str(channel).lower()}"] = background
+
+        missing = [
+            key
+            for condition in ("left", "right", "left_rest", "right_rest")
+            for key in (f"{condition}::{label}" for label in labels)
+            if key not in lookup
+        ]
+        if missing:
+            shown = ", ".join(missing[:6])
+            self._warn(
+                "Missing 1/f background fits for some condition/channel pairs; "
+                f"using zero background for: {shown}"
+                + (" ..." if len(missing) > 6 else "")
+            )
+
+        return lookup
+
+    def _subtract_background_from_power_psds(self, best_fit_df: Any) -> None:
+        """Replace PSD caches with background-removed dB residuals"""
+        first_psd = np.asarray(next(iter(self.psds_power_dict.values())), dtype=float)
+        n_channels, n_bins = first_psd.shape
+        labels = self._channel_labels_for_psd(n_channels)
+        lookup = self._background_lookup_from_best_fit(best_fit_df, labels)
+
+        corrected_dict: Dict[str, np.ndarray] = {}
+        corrected_epochs_dict: Dict[str, np.ndarray] = {}
+
+        for batch, psd_power in self.psds_power_dict.items():
+            condition = self._condition_from_epoch_key(batch)
+            psd_db = self._power_to_db(psd_power)
+            residual = np.empty_like(psd_db, dtype=float)
+
+            for ch_idx, label in enumerate(labels):
+                background = lookup.get(f"{condition}::{label}")
+                if background is None:
+                    background = np.zeros(n_bins, dtype=float)
+                residual[ch_idx, :] = psd_db[ch_idx, :] - background
+
+            corrected_dict[batch] = residual
+
+        for batch, psd_power_epochs in self.psds_power_epochs_dict.items():
+            condition = self._condition_from_epoch_key(batch)
+            psd_db_epochs = self._power_to_db(psd_power_epochs)
+            residual_epochs = np.empty_like(psd_db_epochs, dtype=float)
+
+            for ch_idx, label in enumerate(labels):
+                background = lookup.get(f"{condition}::{label}")
+                if background is None:
+                    background = np.zeros(n_bins, dtype=float)
+                residual_epochs[:, ch_idx, :] = psd_db_epochs[:, ch_idx, :] - background[np.newaxis, :]
+
+            corrected_epochs_dict[batch] = residual_epochs
+
+        self.psds_dict = corrected_dict
+        self.psds_epochs_dict = corrected_epochs_dict
+        self.psd_values_are_db = True
+        self.psd_value_units = "dB"
+        self.psd_value_label = "1/f-subtracted PSD residual (dB)"
+        self.parameter_summary["psd_value_units"] = self.psd_value_units
+        self.parameter_summary["psd_value_label"] = self.psd_value_label
+
+    def _apply_one_over_f_background_subtraction(self) -> None:
+        """Fit and subtract the selected 1/f background from all PSD caches"""
+        input_csv = self._write_background_fit_input_csv()
+        results = self._fit_one_over_f_background(input_csv=input_csv)
+        best_fit_df = results["best_fit_df"]
+
+        self._subtract_background_from_power_psds(best_fit_df)
+
+        fit_summary_df = results.get("fit_summary_df")
+        selected_model_counts: Dict[str, int] = {}
+        if fit_summary_df is not None and not fit_summary_df.empty:
+            selected = fit_summary_df[fit_summary_df.get("is_selected_best_model") == True]
+            selected_model_counts = {
+                str(key): int(value)
+                for key, value in selected["model_name"].value_counts().to_dict().items()
+            }
+
+        for key in (
+            "aggregated_csv",
+            "best_fit_csv",
+            "fit_summary_csv",
+            "peak_summary_csv",
+            "peak_group_summary_csv",
+        ):
+            path = results.get(key)
+            if path is not None:
+                self._track_export(str(path))
+
+        for path in results.get("plot_paths", []):
+            self._track_export(str(path))
+
+        self.background_fit_outputs = {
+            "input_csv": input_csv,
+            "aggregated_csv": str(results.get("aggregated_csv")),
+            "best_fit_csv": str(results.get("best_fit_csv")),
+            "fit_summary_csv": str(results.get("fit_summary_csv")),
+            "peak_summary_csv": str(results.get("peak_summary_csv")),
+            "peak_group_summary_csv": str(results.get("peak_group_summary_csv")),
+            "selected_model_counts": selected_model_counts,
+            "n_condition_channel_fits": int(
+                best_fit_df[["condition", "channel"]].drop_duplicates().shape[0]
+            ),
+        }
+        self.parameter_summary["one_over_f_background_fit"] = self.background_fit_outputs
 
     def _grab_left_right_electrodes(self) -> Tuple[List[str], List[str]]:
         """Split motor-imagery channels into left/right hemispheres using montage x-coordinates and store masks"""
@@ -1037,11 +1318,6 @@ class EEGMotorImagery:
 
         bands = self.freq_bands
 
-        # Local dB conversion as 10 * log10(X * 1e12)
-        def _to_db(x: np.ndarray) -> np.ndarray:
-            x = np.asarray(x)
-            return 10.0 * np.log10(x * 1e12)
-
         # Normalize bands into a list of (low, high) tuples
         if isinstance(bands, tuple) and len(bands) == 2:
             band_list = [tuple(map(float, bands))]
@@ -1105,12 +1381,12 @@ class EEGMotorImagery:
             x_task = np.mean(x_task_all[:, :, start:stop], axis=2)
             x_ctrl = np.mean(x_ctrl_all[:, :, start:stop], axis=2)
             
-            # Convert to dB to match original analysis expectations
-            x_task_db = _to_db(x_task)
-            x_ctrl_db = _to_db(x_ctrl)
+            # Convert raw power to dB for the original scheme; residual runs are already dB
+            x_task_values = self._psd_values_for_analysis(x_task)
+            x_ctrl_values = self._psd_values_for_analysis(x_ctrl)
             
             # Stack trials: task first, control second
-            x = np.concatenate([x_ctrl_db, x_task_db], axis=0)
+            x = np.concatenate([x_ctrl_values, x_task_values], axis=0)
 
             stat_fn = lambda xx, it: self._difference_of_sums_effect(
                 xx, it, is_contralat=is_contralat, symm_dict=symm_dict, transf=transf
@@ -1136,11 +1412,13 @@ class EEGMotorImagery:
             band_results[band_key] = {
                 "band": (low_f, high_f),
                 "band_idx": band_idx,
-                "x_task": x_task_db,
-                "x_control": x_ctrl_db,
+                "x_task": x_task_values,
+                "x_control": x_ctrl_values,
                 "effect_per_channel": effect_per_ch,
                 "permutation": perm,
                 "bootstrap": boot,
+                "psd_processing": self.psd_processing,
+                "psd_value_units": self.psd_value_units,
             }
 
             #is_contralat_chs = np.array(self.ch_set.get_labels())[is_contralat]
@@ -1635,16 +1913,20 @@ class EEGMotorImagery:
                     self._warn(f"Could not export ERD/ERS for {task} {band}: {exc}")
                     continue
                 for i, t in enumerate(curve["time_sec"]):
+                    value = float(curve["mean_pct"][i])
                     rows.append({
                         "task": task,
                         "rest": rest,
                         "band": f"{band[0]:g}-{band[1]:g}Hz",
                         "roi": "contra",
                         "time_sec": float(t),
-                        "erd_ers_pct": float(curve["mean_pct"][i]),
+                        "erd_ers_pct": value,
+                        "erd_ers_value": value,
+                        "erd_ers_unit": curve.get("value_unit", "%"),
                         "ci_low": float(curve["ci_low"][i]),
                         "ci_high": float(curve["ci_high"][i]),
                         "n_trials": int(curve["n_trials"]),
+                        "psd_processing": curve.get("psd_processing", self.psd_processing),
                     })
         self._write_csv_rows("erd_ers_timecourse.csv", rows)
 
@@ -1658,6 +1940,9 @@ class EEGMotorImagery:
             "trial_quality": getattr(self, "trial_quality_summary", []),
             "main_results": getattr(self, "main_result_summary", []),
             "decoding_results": getattr(self, "decoding_results", []),
+            "psd_processing": self.psd_processing,
+            "psd_value_units": self.psd_value_units,
+            "background_fit": getattr(self, "background_fit_outputs", {}),
             "generated_figures": [self._relative_output_path(x) for x in self.generated_figures],
             "exported_files": [self._relative_output_path(x) for x in self.exported_files],
             "warnings": self.analysis_warnings,
@@ -2302,30 +2587,28 @@ class EEGMotorImagery:
                 f"Frequency bins length ({freqs.shape[0]}) does not match PSD bins ({n_bins})"
             )
 
-        # Slice PSDs for the selected channel and convert to dB
-        def _to_db(x: np.ndarray) -> np.ndarray:
-            """Convert PSDs to dB using 10 * log10(x * 1e12)"""
-            x = np.asarray(x)
-            return 10.0 * np.log10(x * 1e12)
-
         # PSDs per condition: shape (blocks, bins)
         x_left        = psds_left[:,       ch_idx, :]
         x_right       = psds_right[:,      ch_idx, :]
         x_left_rest   = psds_left_rest[:,  ch_idx, :]
         x_right_rest  = psds_right_rest[:, ch_idx, :]
 
-        x_left_db        = _to_db(x_left)
-        x_right_db       = _to_db(x_right)
-        x_left_rest_db   = _to_db(x_left_rest)
-        x_right_rest_db  = _to_db(x_right_rest)
+        x_left_db        = self._psd_values_for_analysis(x_left)
+        x_right_db       = self._psd_values_for_analysis(x_right)
+        x_left_rest_db   = self._psd_values_for_analysis(x_left_rest)
+        x_right_rest_db  = self._psd_values_for_analysis(x_right_rest)
 
         # Global min/max across all conditions for reasonable y-limits
         x_all_db = np.vstack([x_left_db, x_right_db, x_left_rest_db, x_right_rest_db])
-        min_val = float(np.min(x_all_db))
-        max_val = float(np.max(x_all_db))
-
-        min_y = int(min_val - np.abs(min_val) * 0.05)
-        max_y = int(max_val + np.abs(max_val) * 0.02)
+        finite_y = x_all_db[np.isfinite(x_all_db)]
+        if finite_y.size:
+            min_val = float(np.min(finite_y))
+            max_val = float(np.max(finite_y))
+            span = max(max_val - min_val, 1.0)
+            min_y = float(np.floor(min_val - span * 0.08))
+            max_y = float(np.ceil(max_val + span * 0.08))
+        else:
+            min_y, max_y = -1.0, 1.0
 
         # Helper: mean and standard error across blocks
         def _mean_and_se(x: np.ndarray, axis: int = 0) -> Tuple[np.ndarray, np.ndarray]:
@@ -2368,6 +2651,8 @@ class EEGMotorImagery:
         ax1.set_xlim(freqs[0], freqs[-1])
         ax1.set_ylim(min_y, max_y)
         ax1.set_xscale("log")
+        if self.psd_values_are_db:
+            ax1.axhline(0.0, lw=1, ls="--", color="black", alpha=0.35)
 
         # Vertical grid at key frequencies
         for f in [2, 4, 6, 8, 10, 20, 30]:
@@ -2385,7 +2670,7 @@ class EEGMotorImagery:
                 end_multiple = end
             return list(range(start_multiple, end_multiple + 1, n))
 
-        for y in _multiples_of_n(min_y, max_y, 5):
+        for y in _multiples_of_n(int(np.floor(min_y)), int(np.ceil(max_y)), 5):
             ax1.axhline(y, lw=1, ls=":", color="grey", alpha=0.4)
 
         legend = ax1.legend(loc="lower left")
@@ -2402,7 +2687,7 @@ class EEGMotorImagery:
                     t.set_fontproperties(bold_font)
 
         ax1.set_xticks([])
-        ax1.set_ylabel("[dB]", loc="top")
+        ax1.set_ylabel(self._psd_axis_label(), loc="top")
         ax1.text(
             0.0,
             1.05,
@@ -2413,6 +2698,16 @@ class EEGMotorImagery:
             transform=ax1.transAxes,
             fontsize=12,
         )
+        if self.psd_values_are_db:
+            ax1.text(
+                0.0,
+                1.00,
+                "1/f background removed",
+                va="top",
+                ha="left",
+                transform=ax1.transAxes,
+                fontsize=8,
+            )
         
         self._plot_frequency_bands(ax=ax1, ylim=(min_y, max_y), fontsize=12, fraction=0.07)
 
@@ -3097,15 +3392,20 @@ class EEGMotorImagery:
         for key, psd in self.psds_dict.items():
             condition = self._condition_from_epoch_key(key)
             psd = np.asarray(psd, dtype=float)
+            psd_values = self._psd_values_for_analysis(psd)
             for ch_idx in mi_indices:
                 for f_idx, freq in enumerate(freqs):
+                    value = float(psd_values[ch_idx, f_idx])
                     rows.append({
                         "batch": key,
                         "condition": condition,
                         "channel": labels[ch_idx],
                         "frequency_hz": float(freq),
-                        "psd_power": float(psd[ch_idx, f_idx]),
-                        "psd_db": float(10.0 * np.log10(psd[ch_idx, f_idx] * 1e12)),
+                        "psd_power": "" if self.psd_values_are_db else float(psd[ch_idx, f_idx]),
+                        "psd_db": value,
+                        "psd_value": value,
+                        "psd_units": self.psd_value_units,
+                        "psd_processing": self.psd_processing,
                     })
         self._write_csv_rows("psd_long_format.csv", rows)
 
@@ -3322,7 +3622,14 @@ class EEGMotorImagery:
         if task_mat.size == 0:
             raise RuntimeError("No usable trials after filtering/truncation")
 
-        rel_trials = 100.0 * (task_mat - rest_mat) / (rest_mat + 1e-12)
+        if self.psd_values_are_db:
+            rel_trials = task_mat - rest_mat
+            value_unit = "dB"
+            value_label = "Task minus matched rest residual [dB]"
+        else:
+            rel_trials = 100.0 * (task_mat - rest_mat) / (rest_mat + 1e-12)
+            value_unit = "%"
+            value_label = "ERD/ERS vs rest [%]"
         rel = np.mean(rel_trials, axis=0)
         lo, hi = np.percentile(rel_trials, [(100 - ci) / 2.0, 100 - (100 - ci) / 2.0], axis=0)
 
@@ -3336,6 +3643,9 @@ class EEGMotorImagery:
             "band": band,
             "task": task_prefix,
             "rest": rest_prefix,
+            "value_unit": value_unit,
+            "value_label": value_label,
+            "psd_processing": self.psd_processing,
         }
 
     def _plot_within_trial_bandpower(
@@ -3366,7 +3676,7 @@ class EEGMotorImagery:
         ax.axhline(0.0, linestyle="--", linewidth=1)
 
         ax.set_xlabel("Time within trial [s]")
-        ax.set_ylabel("ERD/ERS vs rest [%]")
+        ax.set_ylabel(curve.get("value_label", "ERD/ERS vs rest [%]"))
         ax.set_title(
             f"{task_prefix} vs {rest_prefix} | {band[0]:g}-{band[1]:g} Hz | ROI={roi} | n={curve['n_trials']}",
             loc="left",
@@ -3403,6 +3713,7 @@ class EEGMotorImagery:
             )
             for roi in ("contra", "ipsi")
         }
+        value_label = next(iter(curves.values())).get("value_label", "Bandpower change vs matched rest [%]")
 
         fig, ax = plt.subplots(1, 1, figsize=figsize)
         style = {
@@ -3421,7 +3732,7 @@ class EEGMotorImagery:
 
         ax.axhline(0.0, linestyle="--", linewidth=1, color="0.3")
         ax.set_xlabel("Time within trial [s]")
-        ax.set_ylabel("Bandpower change vs matched rest [%]")
+        ax.set_ylabel(value_label)
         ax.set_title(
             f"Task-vs-rest ERD/ERS overlay | {task_prefix} | {band[0]:g}-{band[1]:g} Hz",
             loc="left",
@@ -3510,4 +3821,3 @@ class EEGMotorImagery:
             self._savefig(fig, basename, formats=("png",))
 
         return fig, ax
-

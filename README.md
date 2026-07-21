@@ -328,6 +328,12 @@ MotorImageryPdfReport(
   such as `PIB1_001`. The importer now drops those non-EEG source rows before EGI
   montage inference, while still preserving BCI2000 state channels when `--keep-stim`
   is enabled.
+- `run_MotorImagery.py` now creates a second report by default in
+  `one_over_f_subtracted/`. That report fits the selected 1/f background from
+  `MotorImagery_aggregate_psds_fit_background.py`, subtracts the selected
+  background in dB from every condition/channel/frequency bin, and runs signed-r²,
+  decoding, ERD/ERS, CSV export, plots, and PDF generation from those residual
+  PSD values. Use `--skip-one-over-f-report` to disable this second report.
 
 ---
 
