@@ -18,7 +18,9 @@ import numpy as np
 from BCI2000Tools.Electrodes import ChannelSet
 from BCI2000Tools.FileReader import bcistream
 
-import helper.eeg_dict as eeg_dict
+from .helper import eeg_dict
+
+HELPER_DIR = Path(__file__).resolve().parent / "helper"
 
 
 SUPPORTED_EXTENSIONS = {".dat"}
@@ -100,6 +102,7 @@ class EEGRawImporter:
         if self.helper_dir is not None:
             search_roots.append(self.helper_dir)
         search_roots.append(Path.cwd())
+        search_roots.append(HELPER_DIR)
 
         tried_paths = [root / file_name for root in search_roots]
         for path in tried_paths:

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eegmcf"
+version = "0.1.0"
+description = "EEG motor command following (EEG-MCF) analysis for BCI2000 .dat recordings"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Shah Lab" }]
+dependencies = [
+    "BCI2000Tools",
+    "numpy",
+    "scipy",
+    "mne",
+    "matplotlib",
+    "pandas",
+    "pyprep",
+    "reportlab",
+    "svglib",
+    "Pillow",
+]
+
+[project.optional-dependencies]
+decoding = ["scikit-learn"]
+
+[project.scripts]
+eegmcf = "eegmcf.run_MotorImagery:main"
+eegmcf-import = "eegmcf.run_RawImporter:main"
+eegmcf-bridging = "eegmcf.run_BridgingChecker:main"
+eegmcf-preprocess = "eegmcf.run_Preprocessing:main"
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.setuptools.package-data]
+"eegmcf.helper" = ["*.txt", "*.svg"]

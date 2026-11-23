@@ -7,8 +7,10 @@ from typing import Any
 
 import mne
 
-from Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
-from RawImporter import EEGRawImporter
+from .Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
+from .RawImporter import EEGRawImporter
+
+HELPER_DIR = Path(__file__).resolve().parent / "helper"
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -20,7 +22,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument("--file-path", required=True, help="Path to the input .dat file")
-    parser.add_argument("--helper-dir", default="./helper", help="Folder containing helper montage files")
+    parser.add_argument("--helper-dir", default=str(HELPER_DIR), help="Folder containing helper montage files")
     parser.add_argument(
         "--keep-stim",
         action=argparse.BooleanOptionalAction,

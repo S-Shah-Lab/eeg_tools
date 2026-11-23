@@ -949,7 +949,7 @@ class EEGMotorImagery:
     def _fit_one_over_f_background(self, input_csv: str) -> Dict[str, Any]:
         """Run the provided aggregate PSD background-fit pipeline"""
         try:
-            from MotorImagery_aggregate_psds_fit_background import process_psd_file
+            from .MotorImagery_aggregate_psds_fit_background import process_psd_file
         except Exception as exc:
             raise RuntimeError(
                 "Could not import MotorImagery_aggregate_psds_fit_background.py "

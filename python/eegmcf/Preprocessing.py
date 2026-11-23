@@ -18,7 +18,7 @@ from BCI2000Tools.Electrodes import ChannelSet
 from mne.io import BaseRaw
 from pyprep.find_noisy_channels import NoisyChannels
 
-import helper.eeg_dict as eeg_dict
+from .helper import eeg_dict
 
 
 StepName = Literal[

@@ -9,11 +9,13 @@ from typing import Any, List
 import mne
 from BCI2000Tools.Electrodes import ChannelSet
 
-from RawImporter import EEGRawImporter
-from BridgingChecker import BridgingChecker
-from Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
-from MotorImagery import EEGMotorImagery
-from PdfReport import MotorImageryPdfReport
+from .RawImporter import EEGRawImporter
+from .BridgingChecker import BridgingChecker
+from .Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
+from .MotorImagery import EEGMotorImagery
+from .PdfReport import MotorImageryPdfReport
+
+HELPER_DIR = Path(__file__).resolve().parent / "helper"
 
 
 MONTAGE_HELPER_FILES = {
@@ -198,7 +200,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--helper-dir",
-        default="./helper",
+        default=str(HELPER_DIR),
         help="Folder containing helper montage files and report assets",
     )
     parser.add_argument(

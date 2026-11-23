@@ -12,7 +12,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument("--file-path", required=True, help="Path to the input .dat file")
-    parser.add_argument("--helper-dir", default="./helper", help="Folder containing helper montage files")
+    parser.add_argument("--helper-dir", default=str(Path(__file__).resolve().parent / "helper"), help="Folder containing helper montage files")
     parser.add_argument("--keep-stim", action="store_true", help="Keep stimulus/state channels")
     parser.add_argument("--verbose", action="store_true", help="Print detailed import information")
 
@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     try:
-        from RawImporter import EEGRawImporter
+        from .RawImporter import EEGRawImporter
     except Exception as exc:
         parser.exit(status=1, message=f"[run_RawImporter] ERROR: could not import dependencies: {exc}\n")
 

@@ -1,4 +1,6 @@
-# eeg_tools
+# eegmcf
+
+EEG motor command following (EEG-MCF).
 
 A Python toolkit for **EEG motor imagery** pipelines built around **BCI2000 `.dat`** recordings: import → (optional) bridged-channel QC → preprocessing → time–frequency (PSD) analysis → stats → **PDF report**.
 
@@ -13,11 +15,23 @@ A Python toolkit for **EEG motor imagery** pipelines built around **BCI2000 `.da
 - **`MotorImagery.py`**: Motor imagery analysis using **Welch PSD** computed over within-trial segments (time-by-epoch, frequency-by-band), with permutation/bootstrapped statistics, report-ready plots, and optional CSV data exports.
 - **`PdfReport.py`**: Assembles plots into a **PDF report**.
 
-### CLI entry points
-- `run_BridgingChecker.py`
-- `run_MotorImagery.py`
+### Installation
+```bash
+git clone git@github.com:S-Shah-Lab/eeg_tools.git
+cd eeg_tools
+pip install -e .            # pip install -e ".[decoding]" adds the optional scikit-learn decoding step
+```
 
-Helper assets (montage locations, etc.) live in `eeg_tools/helper/`.
+### Command-line tools
+Installing the package adds these commands:
+- `eegmcf`: full pipeline (`run_MotorImagery.py`)
+- `eegmcf-import`: import only (`run_RawImporter.py`)
+- `eegmcf-bridging`: bridged-channel QC (`run_BridgingChecker.py`)
+- `eegmcf-preprocess`: preprocessing only (`run_Preprocessing.py`)
+
+Each can also be run as a module, e.g. `python -m eegmcf.run_MotorImagery`.
+
+Helper assets (montage locations, etc.) live in `python/eegmcf/helper/` and ship with the package; `--helper-dir` defaults to that folder.
 
 ---
 
@@ -33,7 +47,7 @@ This package assumes you already live in Python EEG-land:
 - `reportlab`, `svglib`, `Pillow` (PDF report generation)
 - **BCI2000 Python tools** (`BCI2000Tools`) for reading `.dat` streams and channel sets
 
-> Note: `BCI2000Tools` must be importable (installed or on your `PYTHONPATH`). The toolkit imports modules like `BCI2000Tools.FileReader` and `BCI2000Tools.Electrodes`.
+> Note: `BCI2000Tools` is installed from PyPI as a dependency. The toolkit imports modules like `BCI2000Tools.FileReader` and `BCI2000Tools.Electrodes`.
 
 ---
 
@@ -54,9 +68,8 @@ This package assumes you already live in Python EEG-land:
 ## 2. Bridged-channel QC (standalone)
   Run the bridging checker directly:
   ```bash
-  python eeg_tools/run_BridgingChecker.py \
+  eegmcf-bridging \
     --file-path /path/to/recording.dat \
-    --helper-dir ./helper  \
     --show-extra \
     --save-path /path/to/output_folder \
     --verbose
@@ -126,16 +139,15 @@ Quickstart: full pipeline (recommended)
 
 ### Minimal run (provide the `.dat` file path)
 ```bash
-python eeg_tools/run_MotorImagery.py \
+eegmcf \
   --file-path /path/to/file.dat \
-  --helper-dir ./helper \
   --save-path /path/to/output_folder \
   --age-at-test AGE_OF_SUBJECT
 ```
 
   Key parameters:
     - `--file-path`:  Path to motor imagery .dat file
-    - `--helper-dir`: Path to helper directory
+    - `--helper-dir`: Path to helper directory (defaults to the bundled `helper/`)
     - `--save-path`:  Path to directory for output save
     
     - `--skip-bridging`:                Skip bridging analysis
@@ -196,22 +208,22 @@ python eeg_tools/run_MotorImagery.py \
 
 ### Skip bridged-channel QC
 ```bash
-python eeg_tools/run_MotorImagery.py --file-path /path/to/file.dat --skip-bridging
+eegmcf --file-path /path/to/file.dat --skip-bridging
 ```
 
 ### Skip preprocessing (run analysis on raw import)
 ```bash
-python eeg_tools/run_MotorImagery.py --file-path /path/to/file.dat --skip-preprocessing
+eegmcf --file-path /path/to/file.dat --skip-preprocessing
 ```
 
 ### Run analysis only (no PDF report)
 ```bash
-python eeg_tools/run_MotorImagery.py --file-path /path/to/file.dat --skip-report
+eegmcf --file-path /path/to/file.dat --skip-report
 ```
 
 ### Change frequency bands and PSD resolution
 ```bash
-python eeg_tools/run_MotorImagery.py \
+eegmcf \
   --file-path /path/to/file.dat \
   --freq-bands 4,8,13,30,45 \
   --resolution 2.0
@@ -219,7 +231,7 @@ python eeg_tools/run_MotorImagery.py \
 
 ### Skip CSV data export
 ```bash
-python eeg_tools/run_MotorImagery.py --file-path /path/to/file.dat --skip-csv
+eegmcf --file-path /path/to/file.dat --skip-csv
 ```
 
 ---
@@ -228,11 +240,10 @@ python eeg_tools/run_MotorImagery.py --file-path /path/to/file.dat --skip-csv
 
 ### 1. Import a recording
 ```python
-from eeg_tools.RawImporter import EEGRawImporter
+from eegmcf.RawImporter import EEGRawImporter
 
 imp = EEGRawImporter(
     path_to_file="/path/to/recording.dat",
-    helper_dir="eeg_tools/helper",
     keep_stim=False,
     verbose=False,
 )
@@ -243,7 +254,7 @@ ch_set = imp.ch_set    # BCI2000Tools ChannelSet
 
 ### 2. Bridging checker
 ```python
-from eeg_tools.BridgingChecker import BridgingChecker
+from eegmcf.BridgingChecker import BridgingChecker
 
 bc = BridgingChecker(
     raw=raw,
@@ -259,7 +270,7 @@ bc = BridgingChecker(
 
 ### 3. Preprocessing
 ```python
-from eeg_tools.Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
+from eegmcf.Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
 
 config = EEGPreprocessorConfig([
     ("notch", {"freqs": 60.0, "kwargs": {}}),
@@ -276,7 +287,7 @@ raw_clean, history = preproc.run()
 
 ### 4. Motor Imagery Analysis
 ```python
-from eeg_tools.MotorImagery import EEGMotorImagery
+from eegmcf.MotorImagery import EEGMotorImagery
 
 mi = EEGMotorImagery(
     raw_clean,
@@ -305,11 +316,12 @@ The three CSV files written to `save_path` when `export_csv=True`:
 
 ### 5. PDF report
 ```python
-from eeg_tools.PdfReport import MotorImageryPdfReport
+from eegmcf.PdfReport import MotorImageryPdfReport
+from eegmcf.RawImporter import HELPER_DIR
 
 MotorImageryPdfReport(
     plot_folder="./outputs",
-    helper_folder="eeg_tools/helper",
+    helper_folder=HELPER_DIR,
     date_test="N/A",
     montage_name="N/A",
     resolution=1,
@@ -340,20 +352,24 @@ MotorImageryPdfReport(
 ## Project layout
 
 ```
-eeg_tools/
-  BridgingChecker.py
-  MotorImagery.py
-  PdfReport.py
-  Preprocessing.py
-  RawImporter.py
-  run_BridgingChecker.py
-  run_MotorImagery.py
-  run_Preprocessing.py
-  run_RawImporter.py
-  helper/
-    *_location.txt
-    eeg_dict.py
-    ...
+pyproject.toml
+setup.py
+python/
+  eegmcf/
+    BridgingChecker.py
+    MotorImagery.py
+    MotorImagery_aggregate_psds_fit_background.py
+    PdfReport.py
+    Preprocessing.py
+    RawImporter.py
+    run_BridgingChecker.py
+    run_MotorImagery.py
+    run_Preprocessing.py
+    run_RawImporter.py
+    helper/
+      *_location.txt
+      eeg_dict.py
+      ...
 ```
 
 ---
@@ -362,13 +378,13 @@ eeg_tools/
 
 - **`ModuleNotFoundError: BCI2000Tools...`**
   You need the BCI2000 Python tools installed and importable
-    `pip install BCI2000Tools`
+    `pip install BCI2000Tools` (installed automatically by `pip install -e .`)
 
 - **PDF report generation fails**
   Ensure `reportlab`, `svglib`, and `Pillow` are installed. The report generator also expects certain plot files to exist in the output folder
 
 - **Montage/channel name mismatches**
-  Check `eeg_tools/helper/` location files and `helper/eeg_dict.py`, or override montage selection with `--montage-type`
+  Check `python/eegmcf/helper/` location files and `helper/eeg_dict.py`, or override montage selection with `--montage-type`
 
 ---
 
