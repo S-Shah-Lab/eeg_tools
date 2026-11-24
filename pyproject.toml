@@ -4,26 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "eegmcf"
-version = "0.1.0"
+version = "1.1.1"
 description = "EEG motor command following (EEG-MCF) analysis for BCI2000 .dat recordings"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "Shah Lab" }]
 dependencies = [
-    "BCI2000Tools",
-    "numpy",
-    "scipy",
-    "mne",
-    "matplotlib",
-    "pandas",
-    "pyprep",
-    "reportlab",
-    "svglib",
-    "Pillow",
+    "numpy>=1.24,<3",
+    "scipy>=1.10,<2",
+    "mne>=1.4,<2",
+    "matplotlib>=3.7,<4",
+    "pandas>=1.5,<3",
+    "reportlab>=3.6,<5",
+    "svglib>=1.5,<2",
+    "Pillow>=9,<13",
 ]
 
 [project.optional-dependencies]
-decoding = ["scikit-learn"]
+raw = ["BCI2000Tools>=1.0,<3", "pyprep>=0.5,<0.11"]
+decoding = ["scikit-learn>=1.2,<2"]
 
 [project.scripts]
 eegmcf = "eegmcf.run_MotorImagery:main"

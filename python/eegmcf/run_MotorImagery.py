@@ -2,28 +2,42 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
+
 import shutil
 from pathlib import Path
 from typing import Any, List
 
 import mne
-from BCI2000Tools.Electrodes import ChannelSet
+from typing import TYPE_CHECKING
 
-from .RawImporter import EEGRawImporter
-from .BridgingChecker import BridgingChecker
-from .Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
-from .MotorImagery import EEGMotorImagery
-from .PdfReport import MotorImageryPdfReport
+if TYPE_CHECKING:
+    from BCI2000Tools.Electrodes import ChannelSet
 
-HELPER_DIR = Path(__file__).resolve().parent / "helper"
+if __package__:
+    from .RawImporter import EEGRawImporter
+    from .BridgingChecker import BridgingChecker
+    from .Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
+    from .MotorImagery import EEGMotorImagery
+    from .PdfReport import MotorImageryPdfReport
+else:
+    from RawImporter import EEGRawImporter
+    from BridgingChecker import BridgingChecker
+    from Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
+    from MotorImagery import EEGMotorImagery
+    from PdfReport import MotorImageryPdfReport
 
 
-MONTAGE_HELPER_FILES = {
-    "DSI_24": "DSI24_location.txt",
-    "GTEC_32": "GTEC32_location.txt",
-    "EGI_64": "EGI64_location.txt",
-    "EGI_128": "EGI128_location.txt",
-}
+if __package__:
+    from .RecordingMetadata import add_metadata_arguments, apply_overrides, metadata_from_raw, recording_stem, spatial_filter_label
+else:
+    from RecordingMetadata import add_metadata_arguments, apply_overrides, metadata_from_raw, recording_stem, spatial_filter_label
+
+
+if __package__:
+    from .CleanedChannels import CleanedEEGChannelSet, infer_cleaned_montage_type
+else:
+    from CleanedChannels import CleanedEEGChannelSet, infer_cleaned_montage_type
 
 
 def _ensure_dir(path: Path) -> None:
@@ -44,7 +58,7 @@ def _parse_freq_bands(text: str) -> List[float]:
         raise argparse.ArgumentTypeError(
             "freq-bands must include at least two comma-separated numbers"
         )
-    if any(b <= a for a, b in zip(edges[:-1], edges[1:])):
+    if any(not math.isfinite(x) or x < 0 for x in edges) or any(b <= a for a, b in zip(edges[:-1], edges[1:])):
         raise argparse.ArgumentTypeError("freq-bands must be strictly increasing")
 
     return edges
@@ -112,53 +126,13 @@ def _load_cleaned_metadata(raw_path: Path) -> dict[str, Any]:
     if not meta_path.is_file():
         return {}
     try:
-        return json.loads(meta_path.read_text())
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise ValueError("Sidecar must contain a JSON object")
+        return data
     except Exception as exc:
         print(f"[run_MotorImagery warning] Could not read cleaned Raw metadata {meta_path}: {exc}")
         return {}
-
-
-def _infer_montage_type_from_raw(
-    raw: mne.io.BaseRaw,
-    override: str | None = None,
-    metadata: dict[str, Any] | None = None,
-) -> str | None:
-    """Infer montage type from override, sidecar metadata, or EEG channel count"""
-    if override:
-        return override
-
-    metadata = metadata or {}
-    montage_type = metadata.get("montage_type")
-    if montage_type:
-        return str(montage_type)
-
-    n_eeg = len(mne.pick_types(raw.info, eeg=True, exclude=()))
-    if n_eeg in (21, 24):
-        return "DSI_24"
-    if n_eeg == 32:
-        return "GTEC_32"
-    if n_eeg == 64:
-        return "EGI_64"
-    if n_eeg == 128:
-        return "EGI_128"
-    return None
-
-
-def _load_channel_set(helper_dir: Path, montage_type: str | None) -> ChannelSet:
-    """Create the BCI2000 ChannelSet required by the motor-imagery code"""
-    if not montage_type:
-        raise RuntimeError(
-            "Could not infer montage type for cleaned Raw input. Use --montage-type."
-        )
-    helper_name = MONTAGE_HELPER_FILES.get(montage_type)
-    if helper_name is None:
-        valid = ", ".join(sorted(MONTAGE_HELPER_FILES))
-        raise RuntimeError(f"Unknown montage type {montage_type!r}. Valid values: {valid}")
-
-    helper_path = helper_dir / helper_name
-    if not helper_path.is_file():
-        raise FileNotFoundError(f"Missing montage helper file: {helper_path}")
-    return ChannelSet(str(helper_path))
 
 
 def _default_cleaned_raw_output(save_path: Path, input_path: Path) -> Path:
@@ -200,7 +174,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--helper-dir",
-        default=str(HELPER_DIR),
+        default=str(Path(__file__).resolve().parent / "helper"),
         help="Folder containing helper montage files and report assets",
     )
     parser.add_argument(
@@ -252,7 +226,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=True,
         help="Reset raw.info['bads'] after interpolation",
     )
-    parser.add_argument("--reref-channels", default="tp9 tp10", help="Channels used for re-referencing")
+    parser.add_argument("--reref-channels", default="auto", help="Reference channels, or auto (TP9/TP10 when present; otherwise retain acquisition reference)")
     parser.add_argument(
         "--montage-type",
         default=None,
@@ -280,7 +254,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-analysis", action="store_true", help="Skip motor imagery analysis")
     parser.add_argument("--n-epochs", type=int, default=6, help="Number of epochs per trial")
     parser.add_argument("--duration-task", type=float, default=10.0, help="Task duration (s)")
-    parser.add_argument("--skip", dest="skip_sec", type=float, default=1.0, help="Seconds to skip at start of each segment")
+    parser.add_argument("--skip", dest="skip_sec", type=float, default=1.0, help="Seconds to skip once at the beginning of each task window")
     parser.add_argument("--resolution", type=float, default=1.0, help="PSD frequency resolution (Hz/bin)")
     parser.add_argument(
         "--freq-bands",
@@ -306,7 +280,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
     parser.add_argument("--skip-report", action="store_true", help="Skip PDF report generation")
     parser.add_argument("--skip-csv", action="store_true", help="Skip CSV export (PSD per bin + signed r² per band)")
-    parser.add_argument("--age-at-test", default="N/A", help="Age at test (string, used in the PDF header)")
+    add_metadata_arguments(parser)
 
     return parser
 
@@ -317,12 +291,20 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
     cleaned_input = Path(args.cleaned_raw_input).expanduser() if args.cleaned_raw_input else None
     helper_dir = Path(args.helper_dir).expanduser()
 
+    if file_path is not None and cleaned_input is not None:
+        parser.error("Provide only one of --file-path and --cleaned-raw-input")
     if file_path is None and cleaned_input is None:
         parser.error("Provide --file-path for a .dat/.fif input or --cleaned-raw-input for a cached Raw object")
     if file_path is not None and not file_path.is_file():
         parser.error(f"Input file does not exist: {file_path}")
     if cleaned_input is not None and not cleaned_input.is_file():
         parser.error(f"Cleaned Raw input does not exist: {cleaned_input}")
+    if cleaned_input is not None and not _is_cleaned_raw_file(cleaned_input):
+        parser.error("--cleaned-raw-input requires .fif or .fif.gz")
+    if file_path is not None and not (_is_cleaned_raw_file(file_path) or file_path.suffix.lower() == ".dat"):
+        parser.error("Input must be .dat, .fif or .fif.gz")
+    if args.skip_analysis and not args.skip_report:
+        parser.error("--skip-analysis requires --skip-report; regenerate existing plots with PdfReport directly")
     if not helper_dir.is_dir():
         parser.error(f"Helper directory does not exist: {helper_dir}")
     if args.bridge_fmin < 0 or args.bridge_fmax <= args.bridge_fmin:
@@ -337,12 +319,20 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         parser.error("--duration-task must be positive")
     if args.skip_sec < 0:
         parser.error("--skip must be non-negative")
+    if any(not math.isfinite(x) for x in (args.duration_task, args.skip_sec, args.resolution, args.bridge_fmin, args.bridge_fmax, args.bridge_window_sec, args.bandpass_lfreq, args.bandpass_hfreq)):
+        parser.error("Numeric analysis and filter settings must be finite")
     if args.duration_task <= args.skip_sec:
         parser.error("--duration-task must be greater than --skip")
     if args.resolution <= 0:
         parser.error("--resolution must be positive")
     if args.n_sim <= 0:
         parser.error("--n-sim must be positive")
+    if not args.skip_analysis and (args.duration_task - args.skip_sec) / args.n_epochs < 1 / args.resolution:
+        parser.error("Epoch duration must accommodate a Welch window of 1 / resolution seconds")
+    try:
+        apply_overrides({}, args)
+    except ValueError as exc:
+        parser.error(str(exc))
 
 
 def _build_preproc_config(args: argparse.Namespace) -> EEGPreprocessorConfig:
@@ -413,8 +403,13 @@ def main(argv: list[str] | None = None) -> None:
 
     helper_dir = Path(args.helper_dir).expanduser().resolve()
     output_root = Path(args.save_path).expanduser().resolve()
-    output_name = input_path.stem.replace("_cleaned_raw", "")
+    output_name = recording_stem(input_path)
+    # Never combine stale figures from a prior analysis with a new report
     save_path = output_root / output_name
+    suffix = 2
+    while save_path.exists() and any(save_path.iterdir()):
+        save_path = output_root / f"{output_name}_analysis-{suffix:02d}"
+        suffix += 1
     images_path = save_path / "images"
     csv_path = save_path / "csv"
     one_over_f_save_path = save_path / "one_over_f_subtracted"
@@ -461,22 +456,29 @@ def main(argv: list[str] | None = None) -> None:
     _detail("Helper", helper_dir)
     _detail("Simulations", args.n_sim)
 
-    date_test = "N/A"
+    metadata: dict[str, Any] = {}
+    history: dict[str, Any] | None = None
     montage_type: str | None = None
-    ch_set: ChannelSet
+    ch_set: ChannelSet | CleanedEEGChannelSet
 
     if use_cleaned_input:
         _stage(stage_i, total, "Loading cleaned raw EEG")
         stage_i += 1
         metadata = _load_cleaned_metadata(input_path)
         raw = mne.io.read_raw_fif(str(input_path), preload=True, verbose=False)
-        montage_type = _infer_montage_type_from_raw(raw, args.montage_type, metadata)
-        ch_set = _load_channel_set(helper_dir, montage_type)
-        date_test = str(metadata.get("date_test", "N/A"))
+        montage_type = infer_cleaned_montage_type(raw, helper_dir, args.montage_type, metadata)
+        ch_set = CleanedEEGChannelSet(raw)
+        _detail("EEG channels", f"{len(ch_set.get_labels())} (saved FIF order)")
+        _detail("EEG labels", ", ".join(ch_set.get_labels()))
+        if montage_type is None:
+            print("[run_MotorImagery warning] Acquisition montage type unknown; using saved FIF electrode positions. "
+                  "Supply --montage-type if known for the report header")
+        metadata = apply_overrides(metadata_from_raw(raw, input_path, metadata), args)
+        history = metadata.get("preprocessing_history")
         _detail("Mode", "analysis only from cleaned Raw")
         _detail("Cleaned Raw", input_path)
         _detail("Montage", montage_type or "N/A")
-        _detail("Date", date_test)
+        _detail("Date", metadata["recording_date"])
     else:
         _stage(stage_i, total, "Importing raw EEG")
         stage_i += 1
@@ -490,13 +492,16 @@ def main(argv: list[str] | None = None) -> None:
         raw = imp.raw
         ch_set = imp.ch_set
         montage_type = args.montage_type or imp.montage.get("montage_type")
-        date_test = imp.stream.get("date_test") or "N/A"
+        if args.montage_type and args.montage_type != imp.montage.get("montage_type"):
+            raise ValueError("--montage-type does not match the inferred DAT montage; cannot relabel the source data")
+        metadata = apply_overrides(metadata_from_raw(raw, input_path, {key: value for key, value in imp.stream.items() if key not in {"signal", "states", "ch_names"}}), args)
+        history = {}
         aux_source_channels = list(imp.montage.get("aux_source_channels", []))
 
         _detail("Montage", montage_type or "N/A")
         if aux_source_channels:
             _detail("Dropped source rows", ", ".join(aux_source_channels))
-        _detail("Date", date_test)
+        _detail("Date", metadata["recording_date"])
         _detail("Output folder", save_path)
         _detail("Images folder", images_path)
         if not args.skip_csv:
@@ -507,7 +512,7 @@ def main(argv: list[str] | None = None) -> None:
             stage_i += 1
             _detail("Frequency range", f"{args.bridge_fmin:g}-{args.bridge_fmax:g} Hz")
             _detail("Window", f"{args.bridge_window_sec:g} s")
-            BridgingChecker(
+            bridge = BridgingChecker(
                 raw=raw,
                 verbose=args.bridge_verbose,
                 fmin=args.bridge_fmin,
@@ -520,6 +525,9 @@ def main(argv: list[str] | None = None) -> None:
                 axes=None,
                 save_path=str(images_path),
             )
+            if hasattr(bridge, "bridging_checker_fig"):
+                import matplotlib.pyplot as plt
+                plt.close(bridge.bridging_checker_fig)
 
         if not args.skip_preprocessing:
             config = _build_preproc_config(args)
@@ -544,15 +552,14 @@ def main(argv: list[str] | None = None) -> None:
                     if args.cleaned_raw_output
                     else _default_cleaned_raw_output(save_path, input_path)
                 )
-                metadata = {
+                metadata.update({
                     "source_file": str(input_path),
                     "montage_type": montage_type,
-                    "date_test": date_test,
                     "dropped_source_channels": aux_source_channels,
                     "n_channels": int(raw.info["nchan"]),
                     "sfreq": float(raw.info["sfreq"]),
                     "preprocessing_history": history,
-                }
+                })
                 saved_cleaned = _save_cleaned_raw(
                     raw,
                     cleaned_output,
@@ -563,14 +570,24 @@ def main(argv: list[str] | None = None) -> None:
         else:
             _detail("Preprocessing", "skipped")
 
+    metadata.update(montage_type=montage_type, sfreq=float(raw.info["sfreq"]),
+                    highpass=float(raw.info["highpass"]), lowpass=float(raw.info["lowpass"]),
+                    n_eeg_channels=len(mne.pick_types(raw.info, eeg=True, exclude=())),
+                    eeg_channel_labels=[raw.ch_names[i] for i in mne.pick_types(raw.info, eeg=True, exclude=())],
+                    duration_sec=float(raw.n_times / raw.info["sfreq"]),
+                    spatial_filter=spatial_filter_label(history), preprocessing_history=history)
+    (save_path / "recording_metadata.json").write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
+
     if not args.skip_analysis:
+        # Preprocessing can change labels and channel counts; use the resulting Raw geometry
+        ch_set = CleanedEEGChannelSet(raw)
         _stage(stage_i, total, "Running motor imagery analysis")
         stage_i += 1
         _detail("Epochs per trial", args.n_epochs)
         _detail("PSD resolution", f"{args.resolution:g} Hz/bin")
         _detail("Frequency bands", ", ".join(f"{x:g}" for x in args.freq_bands))
         _detail("CSV export", "off" if args.skip_csv else "on")
-        EEGMotorImagery(
+        analysis = EEGMotorImagery(
             raw,
             ch_set,
             nEpochs=args.n_epochs,
@@ -594,7 +611,7 @@ def main(argv: list[str] | None = None) -> None:
             _detail("Output", one_over_f_save_path)
             _detail("PSD scheme", "subtract selected 1/f background in dB")
             _detail("Fit diagnostics", args.one_over_f_plot_channels)
-            EEGMotorImagery(
+            residual_analysis = EEGMotorImagery(
                 raw,
                 ch_set,
                 nEpochs=args.n_epochs,
@@ -614,31 +631,36 @@ def main(argv: list[str] | None = None) -> None:
                 background_fit_plot_channels=_parse_optional_channel_list(args.one_over_f_plot_channels),
             )
             _copy_optional_report_assets(images_path, one_over_f_images_path)
+            (one_over_f_save_path / "recording_metadata.json").write_text(json.dumps(metadata, indent=2, default=str), encoding="utf-8")
 
     if not args.skip_report:
         _stage(stage_i, total, "Building PDF report(s)" if run_one_over_f else "Building PDF report")
         MotorImageryPdfReport(
             plot_folder=str(images_path),
             helper_folder=str(helper_dir),
-            date_test=date_test or "N/A",
+            date_test=metadata["recording_date"],
             montage_name=montage_type or "N/A",
-            resolution=int(args.resolution),
-            age_at_test=str(args.age_at_test),
+            resolution=args.resolution,
+            age_at_test=metadata.get("age_at_test", "N/A"),
+            recording_metadata=metadata,
             save_folder=str(save_path),
             report_title="Command Following Report",
             report_name=output_name,
+            analysis_parameters=analysis.parameter_summary,
         )
         if run_one_over_f:
             MotorImageryPdfReport(
                 plot_folder=str(one_over_f_images_path),
                 helper_folder=str(helper_dir),
-                date_test=date_test or "N/A",
+                date_test=metadata["recording_date"],
                 montage_name=montage_type or "N/A",
-                resolution=int(args.resolution),
-                age_at_test=str(args.age_at_test),
+                resolution=args.resolution,
+                age_at_test=metadata.get("age_at_test", "N/A"),
+                recording_metadata=metadata,
                 save_folder=str(one_over_f_save_path),
                 report_title="Command Following Report (1/f-subtracted PSD)",
                 report_name=output_name,
+                analysis_parameters=residual_analysis.parameter_summary,
             )
 
     print("\nPipeline complete")

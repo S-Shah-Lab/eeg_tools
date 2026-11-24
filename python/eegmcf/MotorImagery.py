@@ -24,7 +24,15 @@ from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.font_manager import FontProperties
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-from BCI2000Tools.Electrodes import ChannelSet
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from BCI2000Tools.Electrodes import ChannelSet
+
+if __package__:
+    from .CleanedChannels import CleanedEEGChannelSet
+else:
+    from CleanedChannels import CleanedEEGChannelSet
 
 
 
@@ -33,7 +41,7 @@ class EEGMotorImagery:
     def __init__(
         self,
         raw    : BaseRaw,
-        ch_set : ChannelSet,
+        ch_set : ChannelSet | CleanedEEGChannelSet,
         nEpochs: int = 6, 
         duration_task: float = 10., 
         skip: float = 1., 
@@ -56,13 +64,24 @@ class EEGMotorImagery:
         # Work on a copy if requested
         self.raw: BaseRaw = raw.copy() if copy else raw
         self.raw.load_data()
+        if not isinstance(nEpochs, int) or nEpochs <= 0 or duration_task <= skip or skip < 0 or resolution <= 0 or nSim <= 0:
+            raise ValueError("Invalid epoch, task duration, skip, resolution or simulation settings")
+        fs = float(self.raw.info["sfreq"])
+        if int(fs / resolution) < 2 or int(fs / resolution) > int(round((duration_task - skip) * fs / nEpochs)):
+            raise ValueError("Welch FFT window must contain at least two samples and fit inside one epoch")
 
         self.ch_set        = ch_set
+        eeg_names = [raw.ch_names[i] for i in mne.pick_types(raw.info, eeg=True, exclude=())]
+        if [name.lower() for name in eeg_names] != [str(name).lower() for name in ch_set.get_labels()]:
+            raise ValueError("EEG channel order does not match ChannelSet; verify montage and cleaned Raw metadata")
+        bad_eeg = set(eeg_names).intersection(raw.info.get("bads", []))
+        if bad_eeg:
+            raise ValueError(f"Unresolved EEG bad channels: {sorted(bad_eeg)}; interpolate or explicitly resolve them before analysis")
         self.nEpochs       = nEpochs
         self.duration_task = duration_task
         self.skip          = skip
         self.resolution    = resolution
-        self.freq_bands    = freq_bands
+        self.freq_bands    = list(freq_bands) if isinstance(freq_bands, list) else freq_bands
         self.nSim          = nSim
         
         self.strict        = strict
@@ -86,6 +105,11 @@ class EEGMotorImagery:
         self.generated_figures: List[str] = []
         self.exported_files: List[str] = []
         self.analysis_warnings: List[str] = []
+        if self.psd_processing == "one_over_f_subtracted":
+            if self.run_decoding:
+                self.run_decoding = False
+                self._warn("Decoding disabled: condition-specific background fitting uses class labels before cross-validation")
+            self._warn("1/f-subtracted statistics are exploratory: the condition-specific fit is not repeated within permutations")
         self.trial_quality_summary: List[Dict[str, Any]] = []
         self.paradigm_event_summary: List[Dict[str, Any]] = []
         self.parameter_summary: Dict[str, Any] = {}
@@ -248,6 +272,8 @@ class EEGMotorImagery:
 
         self._info("Running lateralized statistics")
         self._run_stat_tests(verbose=self.verbose)
+        if not self.stats_results:
+            raise RuntimeError("No valid task-versus-rest statistical comparison; review paradigm and epoch quality")
         self._apply_fdr_to_stats()
         self._build_main_result_summary()
 
@@ -260,7 +286,13 @@ class EEGMotorImagery:
             self._export_all_csv()
 
         self._info("Generating report plots")
-        self._generate_report_plots()
+        existing_figures = set(plt.get_fignums())
+        try:
+            self._generate_report_plots()
+        finally:
+            if self.save_path is not None:
+                for number in set(plt.get_fignums()) - existing_figures:
+                    plt.close(number)
 
         if self.save_path is not None:
             self._export_report_metadata_json()
@@ -486,11 +518,13 @@ class EEGMotorImagery:
 
     def _build_parameter_summary(self) -> Dict[str, Any]:
         """Store analysis parameters that should appear in exports and the PDF"""
+        n_fft = int(float(self.raw.info["sfreq"]) / self.resolution)
         self.parameter_summary = {
             "n_epochs_per_trial": int(self.nEpochs),
             "duration_task_sec": float(self.duration_task),
             "skip_sec": float(self.skip),
-            "psd_resolution_hz": float(self.resolution),
+            "psd_resolution_hz": float(self.raw.info["sfreq"]) / n_fft,
+            "requested_psd_resolution_hz": float(self.resolution),
             "freq_bands_input": list(map(float, self.freq_bands)) if isinstance(self.freq_bands, list) else self.freq_bands,
             "n_simulations": int(self.nSim),
             "strict_channel_set": bool(self.strict),
@@ -584,6 +618,8 @@ class EEGMotorImagery:
         stimCode    = None
         presentDisp = None
         
+        if "StimulusCode" not in self.raw.ch_names:
+            raise ValueError("Motor imagery requires the BCI2000 StimulusCode state. Re-import the DAT with keep_stim=True, or use a FIF that retains it")
         stimCode = self.raw.get_data(picks='StimulusCode').ravel()
 
         try:
@@ -627,9 +663,10 @@ class EEGMotorImagery:
         # Grab existing annotations
         annot = self.raw.annotations
         # Bad regions annotations
-        onset_bad       = list(annot.onset[   np.where(annot.description == "BAD_region")]) # in seconds
-        duration_bad    = list(annot.duration[np.where(annot.description == "BAD_region")]) # in seconds
-        description_bad = ["BAD_region"] * len(duration_bad)
+        bad_mask = np.array([str(desc).lower().startswith("bad") for desc in annot.description], dtype=bool)
+        onset_bad = list(annot.onset[bad_mask] - self.raw.first_time)
+        duration_bad = list(annot.duration[bad_mask])
+        description_bad = list(annot.description[bad_mask])
         # Trial type annotations
         onset_       = []
         duration_    = []
@@ -764,6 +801,8 @@ class EEGMotorImagery:
                     print(f"[epochs] Failed '{key}': {e}")
                 continue
 
+        if not epochs_dict:
+            raise RuntimeError("No usable motor imagery epochs remain after annotation rejection")
         self.epochs_dict = epochs_dict
 
     def _make_psds_batch(
@@ -793,6 +832,7 @@ class EEGMotorImagery:
         # Compute PSD using Welch's method and keep MNE's exact frequency vector
         spectrum = self.epochs_dict[ batch ].compute_psd(
             method="welch",
+            picks="eeg",
             fmin=fmin,
             fmax=fmax,
             tmin=tmin,
@@ -805,6 +845,8 @@ class EEGMotorImagery:
             # output="power", # only past version 1.4, before that it's power by default
             verbose=False,
         )
+        if [name.lower() for name in spectrum.ch_names] != [str(name).lower() for name in self.ch_set.get_labels()]:
+            raise ValueError("PSD channel order does not match the analysis channel labels")
         psd_ = spectrum.get_data()
         freqs_ = np.asarray(getattr(spectrum, "freqs", []), dtype=float)
         if freqs_.size == 0:
@@ -862,12 +904,14 @@ class EEGMotorImagery:
                     nOverlap=n_overlap,
                     aggregate_epochs=False,
                 )
-                psds_epochs_dict[key] = psd_epochs
-                psds_dict[key] = np.mean(psd_epochs, axis=0)
+                if psd_epochs.shape[1] != len(self.ch_set.get_labels()):
+                    raise ValueError("PSD channel rows do not match ChannelSet")
                 if not hasattr(self, "freqs"):
                     self.freqs = np.asarray(freqs, dtype=float)
                 elif len(self.freqs) != len(freqs) or not np.allclose(self.freqs, freqs):
-                    self._warn(f"PSD frequency bins differ for batch '{key}'. Using first batch frequency vector")
+                    raise ValueError(f"PSD frequency bins differ for batch {key}")
+                psds_epochs_dict[key] = psd_epochs
+                psds_dict[key] = np.mean(psd_epochs, axis=0)
             except Exception as exc:
                 self._warn(f"PSD computation failed for batch '{key}': {exc}")
                 continue
@@ -949,7 +993,10 @@ class EEGMotorImagery:
     def _fit_one_over_f_background(self, input_csv: str) -> Dict[str, Any]:
         """Run the provided aggregate PSD background-fit pipeline"""
         try:
-            from .MotorImagery_aggregate_psds_fit_background import process_psd_file
+            if __package__:
+                from .MotorImagery_aggregate_psds_fit_background import process_psd_file
+            else:
+                from MotorImagery_aggregate_psds_fit_background import process_psd_file
         except Exception as exc:
             raise RuntimeError(
                 "Could not import MotorImagery_aggregate_psds_fit_background.py "
@@ -1096,7 +1143,10 @@ class EEGMotorImagery:
     def _grab_left_right_electrodes(self) -> Tuple[List[str], List[str]]:
         """Split motor-imagery channels into left/right hemispheres using montage x-coordinates and store masks"""
         
-        dict_chs = self.raw.get_montage().get_positions()['ch_pos']
+        montage = self.raw.get_montage()
+        if montage is None:
+            raise RuntimeError("Motor imagery analysis requires an EEG montage")
+        dict_chs = {name.lower(): position for name, position in montage.get_positions()["ch_pos"].items()}
         # Consider all left and right channels
         chRight = [key for key in dict_chs.keys() if dict_chs[ key ][0] > 0]
         chLeft  = [key for key in dict_chs.keys() if dict_chs[ key ][0] < 0]
@@ -1104,14 +1154,18 @@ class EEGMotorImagery:
         chRight = [ch for ch in chRight if ch in self.ch_motor_imagery]
         chLeft  = [ch for ch in chLeft  if ch in self.ch_motor_imagery]
         # Convert ch_set channels into an array of True of False based on the ones to consider
-        isRight = [True if x in chRight else False for x in self.ch_set.get_labels()]
-        isLeft  = [True if x in chLeft  else False for x in self.ch_set.get_labels()]
+        isRight = [True if str(x).lower() in chRight else False for x in self.ch_set.get_labels()]
+        isLeft  = [True if str(x).lower() in chLeft else False for x in self.ch_set.get_labels()]
         
         self.chRight = np.array(chRight)
         self.chLeft  = np.array(chLeft)
         
         self.isRight = np.array(isRight)
         self.isLeft  = np.array(isLeft )
+        if not self.isLeft.any() or not self.isRight.any():
+            raise RuntimeError("No usable bilateral motor imagery channels in the saved montage. "
+                               f"Available EEG labels: {self.ch_set.get_labels()}. "
+                               "Verify electrode naming and positions against the acquisition layout")
             
     def _calculate_r(
         self,
@@ -1174,8 +1228,8 @@ class EEGMotorImagery:
         observed = stat(x, is_treatment)
         hist = [stat(x, self.shuffle(is_treatment, rng=rng)) for _ in range(n_simulations)]
 
-        n_reached = int(np.sum(np.asarray(hist) > observed))
-        p = (0.5 + n_reached) / (1.0 + n_simulations)
+        n_reached = int(np.sum(np.asarray(hist) >= observed))
+        p = (1.0 + n_reached) / (1.0 + n_simulations)
 
         return {
             "observed": float(observed),
@@ -1205,8 +1259,8 @@ class EEGMotorImagery:
             for _ in range(n_simulations)
         ]
 
-        n_reached = int(np.sum(np.asarray(hist) < null_hypothesis_value))
-        p = (0.5 + n_reached) / (1.0 + n_simulations)
+        n_reached = int(np.sum(np.asarray(hist) <= null_hypothesis_value))
+        p = (1.0 + n_reached) / (1.0 + n_simulations)
 
         return {
             "observed": float(observed),
@@ -1476,8 +1530,7 @@ class EEGMotorImagery:
                         )
 
             except (KeyError, ValueError, RuntimeError) as exc:
-                if verbose:
-                    print(f"[{name}] skipped: {exc}")
+                self._warn(f"[{name}] skipped: {exc}")
 
         if not results:
             self._warn("No lateralized statistical comparisons were completed")
@@ -2552,14 +2605,14 @@ class EEGMotorImagery:
         # Prefer ChannelSet, since everything else uses it
         try:
             idxs = self.ch_set.find_labels(ch_name_lower)
-            if idxs:
+            if len(idxs):
                 ch_idx = int(idxs[0])
         except Exception:
             ch_idx = None
 
         # Fallback: search in Raw's channel names
         if ch_idx is None:
-            ch_names = np.array(self.raw.info["ch_names"], dtype=str)
+            ch_names = np.array(self.ch_set.get_labels(), dtype=str)
             ch_lower = np.char.lower(ch_names)
             matches = np.where(ch_lower == ch_name_lower)[0]
             if matches.size == 0:
@@ -2648,9 +2701,12 @@ class EEGMotorImagery:
         ax1.plot(freqs, mean, color="magenta", label="Rest Right", alpha=0.35)
 
         # Axis formatting
-        ax1.set_xlim(freqs[0], freqs[-1])
-        ax1.set_ylim(min_y, max_y)
+        positive_freqs = freqs[freqs > 0]
+        if positive_freqs.size < 2:
+            raise ValueError("PSD plotting requires at least two positive frequency bins")
         ax1.set_xscale("log")
+        ax1.set_xlim(positive_freqs[0], positive_freqs[-1])
+        ax1.set_ylim(min_y, max_y)
         if self.psd_values_are_db:
             ax1.axhline(0.0, lw=1, ls="--", color="black", alpha=0.35)
 
@@ -2738,9 +2794,9 @@ class EEGMotorImagery:
         )
         ax2.plot(freqs, r2_right, color="red", label="Right")
 
-        ax2.set_xlim(freqs[0], freqs[-1])
-        ax2.set_ylim(0.0, 0.8)
         ax2.set_xscale("log")
+        ax2.set_xlim(positive_freqs[0], positive_freqs[-1])
+        ax2.set_ylim(-1.0 if signed_r2 else 0.0, 1.0)
 
         # Gridlines
         for f in [2, 4, 6, 8, 10, 20, 30]:
@@ -2762,8 +2818,9 @@ class EEGMotorImagery:
         ax2.set_ylabel(r"R$^{2}$")
 
         # Custom x/y ticks similar to the old script
-        ax2.set_xticks([2, 4, 6, 8, 10, 20, 30, 40])
-        ax2.set_xticklabels([2, 4, 6, 8, 10, 20, 30, 40])
+        ticks = [f for f in (2, 4, 6, 8, 10, 20, 30, 40) if positive_freqs[0] <= f <= positive_freqs[-1]]
+        ax2.set_xticks(ticks)
+        ax2.set_xticklabels(ticks)
 
         ax2.set_yticks([0.0, 0.2, 0.4, 0.6])
         ax2.set_yticklabels([0.0, 0.2, 0.4, 0.6])
@@ -3047,7 +3104,7 @@ class EEGMotorImagery:
         # Decide which labels appear as lane bars (BAD_region handled separately)
         labels = []
         for desc in annot.description:
-            s = str(desc)
+            s = "BAD_region" if str(desc).lower().startswith("bad") else str(desc)
             if include_numbered:
                 labels.append(s)
             else:
@@ -3227,28 +3284,17 @@ class EEGMotorImagery:
         ax.axvspan(x_min, 0.0, color="#f7c7c7", alpha=0.28, zorder=0)
         #ax.axvspan(0.0, x_max, color="#c8e6c9", alpha=0.28, zorder=0, label=r"Good: $\Delta > 0$")
 
-        ax.errorbar(
-            obs_l,
-            y - 0.12,
-            xerr=[obs_l - lo_l, hi_l - obs_l],
-            fmt="o",
-            capsize=3,
-            color="tab:blue",
-            ecolor="tab:blue",
-            label="Left hand (vs rest)",
-            zorder=3,
-        )
-        ax.errorbar(
-            obs_r,
-            y + 0.12,
-            xerr=[obs_r - lo_r, hi_r - obs_r],
-            fmt="s",
-            capsize=3,
-            color="tab:red",
-            ecolor="tab:red",
-            label="Right hand (vs rest)",
-            zorder=3,
-        )
+        # A percentile interval need not contain the observed statistic
+        # Draw endpoints directly instead of constructing possibly negative error lengths
+        for obs, lo, hi, offset, marker, color, label in (
+            (obs_l, lo_l, hi_l, -0.12, "o", "tab:blue", "Left hand (vs rest)"),
+            (obs_r, lo_r, hi_r, 0.12, "s", "tab:red", "Right hand (vs rest)"),
+        ):
+            row_y = y + offset
+            ax.hlines(row_y, lo, hi, color=color, linewidth=1.2, zorder=2)
+            ax.vlines(lo, row_y-0.035, row_y+0.035, color=color, linewidth=1.2, zorder=2)
+            ax.vlines(hi, row_y-0.035, row_y+0.035, color=color, linewidth=1.2, zorder=2)
+            ax.plot(obs, row_y, marker=marker, linestyle="none", color=color, label=label, zorder=3)
 
         ax.axvline(0.0, linestyle="--", linewidth=1, color="0.25", label=r"$\Delta = 0$", zorder=2)
         ax.set_xlim(x_min, x_max)
@@ -3279,7 +3325,7 @@ class EEGMotorImagery:
                  r"$\Delta$ = $\sum$ ipsilateral signed $r^2$ $-$ $\sum$ contralateral signed $r^2$",
                  ha="left", va="bottom", fontsize=9)
         fig.text(0.01,0.04, 
-                 "Computed from band-averaged PSD (tast vs rest) using target channels",
+                 "Computed from band-averaged PSD (task vs rest) using target channels",
                  ha="left", va="bottom", fontsize=9)
         fig.text(0.01,0.01, 
                  r"Bad/opposite effect: $\Delta \leq 0$",
@@ -3309,16 +3355,10 @@ class EEGMotorImagery:
         return [k for _, k in keys]
 
     def _resolve_picks_from_names(self, names_lower: List[str]) -> List[int]:
-        """
-        Resolve channel picks (indices) from a list of lowercase channel names,
-        in the Epochs' channel order
-        """
-        if not hasattr(self, "raw"):
-            raise RuntimeError("Missing Raw.")
-        # Use raw channel order (Epochs inherit it)
-        chs = [c.lower() for c in self.raw.info["ch_names"]]
-        name_set = set([n.lower() for n in names_lower])
-        return [i for i, c in enumerate(chs) if c in name_set]
+        """Resolve indices in the EEG-only PSD channel axis, not the full Raw axis."""
+        labels = [str(name).lower() for name in self.ch_set.get_labels()]
+        targets = {name.lower() for name in names_lower}
+        return [i for i, label in enumerate(labels) if label in targets]
 
     def _export_psd_csv(self) -> None:
         """
@@ -3411,15 +3451,14 @@ class EEGMotorImagery:
 
     def _export_r2_csv(self) -> None:
         """
-        Export signed r² per frequency band per channel for motor imagery
-        channels of interest.
+        Export signed r² per frequency band for every analysed channel.
 
         Output file: <save_path>/csv/signed_r2_per_band_per_channel.csv
         Layout:
             rows    — one per (comparison × frequency band) combination,
                       e.g. ('left_vs_left_rest', '4-7Hz')
-            columns — 'comparison', 'band', then one column per motor
-                      imagery channel found in the recording
+            columns — 'comparison', 'band', then one column per channel in
+                      the channel-set order used by the PSD/statistics arrays
             values  — signed r² (negative = power suppression during task,
                       positive = power increase during task)
         """
@@ -3429,16 +3468,28 @@ class EEGMotorImagery:
             print("[CSV] No stats results available. Skipping r² CSV export.")
             return
 
-        # ── Channel mapping ────────────────────────────────────────────────
-        all_labels    = [lbl.lower() for lbl in self.ch_set.get_labels()]
-        mi_labels_set = {ch.lower() for ch in self.ch_motor_imagery}
-
-        mi_indices = [i for i, lbl in enumerate(all_labels) if lbl in mi_labels_set]
-        mi_names   = [all_labels[i] for i in mi_indices]
-
-        if not mi_indices:
-            print("[CSV] No motor imagery channels found. Skipping r² CSV export.")
+        # effect_per_channel is calculated across the complete channel axis.
+        # Keep that same order in the CSV instead of restricting the export to
+        # self.ch_motor_imagery.
+        all_labels = [str(lbl).lower() for lbl in self.ch_set.get_labels()]
+        if not all_labels:
+            print("[CSV] No channels found. Skipping r² CSV export.")
             return
+
+        export_rows = []
+        for comp_name, comp_res in self.stats_results.items():
+            band_results = comp_res.get("band_results", {})
+            for band_key, bres in band_results.items():
+                effect = np.asarray(bres["effect_per_channel"]).reshape(-1)
+                if effect.size != len(all_labels):
+                    raise RuntimeError(
+                        f"Cannot export {comp_name} {band_key}: "
+                        f"effect_per_channel contains {effect.size} values, "
+                        f"but the channel set contains {len(all_labels)} channels."
+                    )
+                export_rows.append(
+                    [comp_name, band_key] + [f"{v:.6f}" for v in effect]
+                )
 
         # ── Write CSV ──────────────────────────────────────────────────────
         fname = self._csv_path("signed_r2_per_band_per_channel.csv")
@@ -3446,15 +3497,8 @@ class EEGMotorImagery:
             return
         with open(fname, "w", newline="") as fh:
             writer = _csv.writer(fh)
-            writer.writerow(["comparison", "band"] + mi_names)
-            for comp_name, comp_res in self.stats_results.items():
-                band_results = comp_res.get("band_results", {})
-                for band_key, bres in band_results.items():
-                    effect     = np.asarray(bres["effect_per_channel"])  # (n_ch,)
-                    mi_effects = effect[mi_indices]
-                    writer.writerow(
-                        [comp_name, band_key] + [f"{v:.6f}" for v in mi_effects]
-                    )
+            writer.writerow(["comparison", "band"] + all_labels)
+            writer.writerows(export_rows)
 
         self._track_export(fname)
         print(f"[CSV] Signed r² per band per channel saved → {fname}")

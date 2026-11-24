@@ -10,17 +10,34 @@ stim channels, and can save validation plots for quick import checks
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import timezone
+
+if __package__:
+    from .RecordingMetadata import HELPER_DIR, metadata_from_dat, parse_recording_time, known
+else:
+    from RecordingMetadata import HELPER_DIR, metadata_from_dat, parse_recording_time, known
 from time import perf_counter
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import mne
 import numpy as np
-from BCI2000Tools.Electrodes import ChannelSet
-from BCI2000Tools.FileReader import bcistream
+if TYPE_CHECKING:
+    from BCI2000Tools.Electrodes import ChannelSet
 
-from .helper import eeg_dict
 
-HELPER_DIR = Path(__file__).resolve().parent / "helper"
+def _bci_tools():
+    """Load acquisition tools only for DAT input"""
+    try:
+        from BCI2000Tools.Electrodes import ChannelSet
+        from BCI2000Tools.FileReader import bcistream
+    except ImportError as exc:
+        raise ImportError("DAT input requires BCI2000Tools. Install eegmcf[raw] or the BCI2000 tools/python distribution") from exc
+    return ChannelSet, bcistream
+
+if __package__:
+    from .helper import eeg_dict
+else:
+    import helper.eeg_dict as eeg_dict
 
 
 SUPPORTED_EXTENSIONS = {".dat"}
@@ -46,7 +63,7 @@ class EEGRawImporter:
     ) -> None:
         """Initialize the importer and immediately load the input file"""
         self.path_to_file = Path(path_to_file).expanduser()
-        self.helper_dir = Path(helper_dir).expanduser() if helper_dir else None
+        self.helper_dir = Path(helper_dir).expanduser() if helper_dir else HELPER_DIR
         self.keep_stim = keep_stim
         self.verbose = verbose
 
@@ -67,17 +84,26 @@ class EEGRawImporter:
         self._log("Decoding BCI2000 stream", verbose_only=True)
         start_time = perf_counter()
 
+        _, bcistream = _bci_tools()
         stream = bcistream(str(self.path_to_file))
-        signal, states = stream.decode()
+        try:
+            signal, states = stream.decode()
+            fs = float(stream.samplingrate())
+            ch_names = [str(name).strip() for name in stream.params["ChannelNames"]]
+            metadata = metadata_from_dat(self.path_to_file, stream.params)
+        finally:
+            close = getattr(stream, "close", None)
+            if callable(close):
+                close()
 
         signal = np.asarray(signal, dtype=float)
-        fs = float(stream.samplingrate())
-        ch_names = list(stream.params["ChannelNames"])
+        if signal.ndim != 2 or signal.shape[0] != len(ch_names):
+            raise ValueError("Decoded DAT signal rows must match ChannelNames")
+        if not np.isfinite(fs) or fs <= 0 or signal.shape[1] == 0:
+            raise ValueError("DAT has invalid sampling rate or no samples")
         n_channels, n_samples = signal.shape
         duration_sec = n_samples / fs if fs else 0.0
 
-        storage_time = stream.params.get("StorageTime", "")
-        date_test = str(storage_time).split("T", 1)[0] if storage_time else "unknown"
         elapsed = perf_counter() - start_time
 
         self._log(
@@ -93,7 +119,7 @@ class EEGRawImporter:
             "n_channels": n_channels,
             "n_samples": n_samples,
             "duration_sec": duration_sec,
-            "date_test": date_test,
+            **metadata,
         }
 
     def _resolve_path(self, file_name: str) -> str:
@@ -102,7 +128,6 @@ class EEGRawImporter:
         if self.helper_dir is not None:
             search_roots.append(self.helper_dir)
         search_roots.append(Path.cwd())
-        search_roots.append(HELPER_DIR)
 
         tried_paths = [root / file_name for root in search_roots]
         for path in tried_paths:
@@ -144,9 +169,22 @@ class EEGRawImporter:
         channels but are not part of the EGI montage files used here.
         """
         if signal.shape[0] == EGI_SOURCE_CHANNEL_COUNT:
+            # The EGI 64 selection indices refer to canonical E1..E128 order
+            ids = []
+            for name in ch_names:
+                normalized = name.lower()
+                mapped = eeg_dict.stand1020_to_egi.get(normalized, normalized)
+                if mapped.startswith("ch"):
+                    mapped = "e" + mapped[2:]
+                if not mapped.startswith("e") or not mapped[1:].isdigit():
+                    raise ValueError(f"Unknown EGI source electrode: {name}")
+                ids.append(int(mapped[1:]))
+            if sorted(ids) != list(range(1, 129)):
+                raise ValueError("EGI source electrodes must uniquely identify E1..E128")
+            order = np.argsort(ids)
             return {
-                "signal": signal,
-                "ch_names": ch_names,
+                "signal": signal[order],
+                "ch_names": [ch_names[i] for i in order],
                 "aux_source_channels": [],
             }
 
@@ -170,8 +208,8 @@ class EEGRawImporter:
         ch_names = list(self.stream["ch_names"])
         signal = np.asarray(self.stream["signal"], dtype=float)
 
-        if n_channels in (21, 24):
-            keep_idx = [idx for idx, ch_name in enumerate(ch_names) if ch_name not in DSI_AUX_CHANNELS]
+        if n_channels in (20, 21, 24):
+            keep_idx = [idx for idx, ch_name in enumerate(ch_names) if ch_name.upper() not in DSI_AUX_CHANNELS]
             dropped = len(ch_names) - len(keep_idx)
             if dropped:
                 self._log(f"Dropping {dropped} DSI aux or trigger channel(s)", verbose_only=True)
@@ -181,6 +219,7 @@ class EEGRawImporter:
                 "ch_info": self._resolve_path("DSI24_location.txt"),
                 "signal": signal[keep_idx],
                 "ch_names": list(np.asarray(ch_names)[keep_idx]),
+                "aux_source_channels": [name for i, name in enumerate(ch_names) if i not in keep_idx],
             }
 
         if n_channels == 32:
@@ -225,10 +264,40 @@ class EEGRawImporter:
 
         raise ValueError(
             f"Unknown montage with {n_channels} source channel(s). "
-            "Supported layouts are DSI 24, GTEC 32, EGI 64, and EGI 128. "
+            "Supported layouts are DSI 24 (20, 21 or 24 source rows), GTEC 32, EGI 64, and EGI 128. "
             "For EGI files with appended auxiliary source rows, the first 128 rows "
             "must be labeled E1..E128 or Ch1..Ch128."
         )
+
+    @staticmethod
+    def _align_source_rows(signal, source_names, target_names, montage_type):
+        """Align identifiable source electrode rows to ChannelSet order"""
+        if len(source_names) != len(target_names) or signal.shape[0] != len(source_names):
+            raise ValueError(f"{montage_type}: {len(source_names)} EEG source rows do not match "
+                             f"{len(target_names)} helper electrodes after auxiliary removal")
+        aliases = {"t7": "t3", "t8": "t4", "p7": "t5", "p8": "t6", "m1": "a1", "m2": "a2"}
+        def normalize(name):
+            name = str(name).strip().lower()
+            if montage_type.startswith("EGI_"):
+                if name.startswith("ch") and name[2:].isdigit():
+                    name = "e" + name[2:]
+                return eeg_dict.stand1020_to_egi.get(name, name)
+            return aliases.get(name, name)
+        source = [normalize(name) for name in source_names]
+        target = [normalize(name) for name in target_names]
+        if len(set(source)) != len(source) or len(set(target)) != len(target):
+            raise ValueError(f"{montage_type}: ambiguous or duplicate electrode names")
+        if set(source) == set(target):
+            lookup = {name: i for i, name in enumerate(source)}
+            return signal[[lookup[name] for name in target]]
+        # Generic ordered Ch1..Ch32 labels have no electrode identities
+        # The existing GTEC helper defines this acquisition order
+        if montage_type == "GTEC_32" and source == [f"ch{i}" for i in range(1, 33)]:
+            print("[RawImporter warning] Generic GTEC labels: assuming the bundled helper acquisition order; verify the cap wiring")
+            return signal
+        raise ValueError(f"{montage_type}: source channel names do not match the helper. "
+                         f"Unexpected: {sorted(set(source)-set(target))}; missing: {sorted(set(target)-set(source))}. "
+                         "Verify acquisition channel names and helper layout")
 
     @staticmethod
     def _make_raw_with_montage(
@@ -571,8 +640,11 @@ class EEGRawImporter:
         montage_type = str(self.montage["montage_type"])
         self._log(f"Resolved montage: {montage_type} ({montage_signal.shape[0]} EEG channels)")
 
+        ChannelSet, _ = _bci_tools()
         self.ch_set = ChannelSet(self.montage["ch_info"])
         ch_labels = list(self.ch_set.get_labels())
+        montage_signal = self._align_source_rows(
+            montage_signal, self.montage["ch_names"], ch_labels, montage_type)
 
         self.raw = self._make_raw_with_montage(
             signal=montage_signal * MICROVOLTS_TO_VOLTS,
@@ -588,6 +660,12 @@ class EEGRawImporter:
             self._add_stim_to_raw()
         else:
             self._log("Stim channels skipped", verbose_only=True)
+
+        _, _, measured = parse_recording_time(self.stream.get("recording_timestamp"))
+        if measured is not None:
+            self.raw.set_meas_date(measured.astimezone(timezone.utc))
+        if known(self.stream.get("subject_id")):
+            self.raw.info["subject_info"] = {"his_id": self.stream["subject_id"]}
 
         self._log(f"Import finished in {perf_counter() - start_time:.2f} s", verbose_only=True)
 

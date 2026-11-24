@@ -9,7 +9,8 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import date
+from datetime import datetime, timezone
+from uuid import uuid4
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Tuple, Union
 
@@ -19,6 +20,12 @@ from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 from svglib.svglib import svg2rlg
+
+
+if __package__:
+    from .RecordingMetadata import PACKAGE_VERSION, clean, known, identity_from_name, parse_recording_time
+else:
+    from RecordingMetadata import PACKAGE_VERSION, clean, known, identity_from_name, parse_recording_time
 
 
 XAnchor = Literal["left", "center", "right"]
@@ -44,13 +51,15 @@ class MotorImageryPdfReport:
         helper_folder: PathLike,
         date_test: str = "N/A",
         montage_name: str = "N/A",
-        resolution: int = 1,
+        resolution: Optional[float] = None,
         age_at_test: str = "N/A",
         save_folder: Optional[PathLike] = None,
         verbose: bool = True,
         auto_generate: bool = True,
         report_title: str = "Command Following Report",
         report_name: Optional[str] = None,
+        recording_metadata: Optional[Dict] = None,
+        analysis_parameters: Optional[Dict] = None,
     ) -> None:
         """Initialize report paths and metadata used to assemble the PDF"""
         self.plot_folder = Path(plot_folder).expanduser()
@@ -62,20 +71,42 @@ class MotorImageryPdfReport:
         self.show_all_lines = False
         self.show_all_points = False
 
-        self.formatted_date = date.today().strftime("%Y-%m-%d")
-        self.version = "N/A"
+        self.version = PACKAGE_VERSION
         self.base_name = report_name or self._infer_report_name(self.plot_folder, self.save_folder)
-        self.sub_name, self.ses_name = self._parse_subject_session(self.base_name)
-
-        self.date_test = date_test
-        self.montage_name = MONTAGE_LABELS.get(montage_name, "N/A")
-        self.resolution = resolution
-        self.age_at_test = age_at_test
+        self.recording_metadata = self._read_json(self.plot_folder.parent / "recording_metadata.json")
+        self.recording_metadata.update(recording_metadata or {})
+        analysis_metadata = self._read_json(self.plot_folder.parent / "report_metadata.json")
+        self.analysis_parameters = dict(analysis_metadata.get("parameters") or {})
+        self.analysis_parameters.update(analysis_parameters or {})
+        self.analysis_warnings = analysis_metadata.get("warnings") or []
+        identity = identity_from_name(self.base_name)
+        for key, value in identity.items():
+            if not known(self.recording_metadata.get(key)):
+                self.recording_metadata[key] = value
+        self.sub_name = clean(self.recording_metadata.get("subject_id"))
+        self.ses_name = clean(self.recording_metadata.get("session_id"))
+        self.run_name = clean(self.recording_metadata.get("run_id"))
+        self.recording_id = clean(self.recording_metadata.get("recording_id"))
+        self.date_test = "N/A"
+        for value in (date_test, self.recording_metadata.get("recording_date"), self.recording_metadata.get("date_test"), self.recording_metadata.get("recording_timestamp")):
+            day, _, _ = parse_recording_time(value)
+            if known(day):
+                self.date_test = day
+                break
+        self.recording_timestamp = clean(self.recording_metadata.get("recording_timestamp"))
+        montage = montage_name if known(montage_name) else clean(self.recording_metadata.get("montage_type"))
+        self.montage_name = MONTAGE_LABELS.get(montage, montage)
+        self.resolution = self.analysis_parameters.get("psd_resolution_hz", resolution)
+        self.age_at_test = clean(age_at_test if known(age_at_test) else self.recording_metadata.get("age_at_test"))
+        self.condition = clean(self.recording_metadata.get("condition"))
+        self.spatial_filter = clean(self.recording_metadata.get("spatial_filter"))
         self.output_name = f"mcf_report_{self.base_name}.pdf"
         self.output_path = self.save_folder / self.output_name
-
-        self.spatial_filter = "Surface Laplacian"
-        self.condition = self._infer_condition(self.sub_name)
+        self.psd_processing = clean(self.analysis_parameters.get("psd_processing"))
+        if self.psd_processing == "one_over_f_subtracted" and self.report_title == "Command Following Report":
+            self.report_title = "Command Following Report (1/f-subtracted PSD)"
+        if self.psd_processing == "N/A" and "1/f-subtracted" in report_title:
+            self.psd_processing = "one_over_f_subtracted"
 
         self.canvas_dim: Dict[str, float] = {}
         self.dict_alph: Dict[str, Tuple[float, float]] = {}
@@ -91,6 +122,11 @@ class MotorImageryPdfReport:
     def generate(self) -> Path:
         """Build and save the PDF report"""
         self._validate_paths()
+        self.generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        self.formatted_date = self.generated_at[:10]
+        self.report_id = str(uuid4())
+        self.missing_files.clear()
+        self.drawn_files.clear()
         self._create_canvas()
         self._get_canvas_dims()
 
@@ -114,8 +150,8 @@ class MotorImageryPdfReport:
         self._plot_stat_dist()
         self._plot_bridged_candidates()
 
-        self._export_report_generation_metadata()
         self.c.save()
+        self._export_report_generation_metadata()
         self._log(f"Saved report: {self.output_path}")
         self._log(f"Figures drawn: {len(self.drawn_files)}")
 
@@ -141,34 +177,14 @@ class MotorImageryPdfReport:
         return plot_folder.name
 
     @staticmethod
-    def _parse_subject_session(base_name: str) -> Tuple[str, str]:
-        """Extract subject and session from a BIDS-like folder name"""
-        subject = "N/A"
-        session = "N/A"
-
-        subject_match = re.search(r"sub-([^_]+)", base_name)
-        session_match = re.search(r"ses-([^_]+)", base_name)
-
-        if subject_match:
-            subject = subject_match.group(1)
-
-        if session_match:
-            session = session_match.group(1)
-
-        return subject, session
-
-    @staticmethod
-    def _infer_condition(subject: str) -> str:
-        """Infer clinical condition from the subject identifier"""
-        subject_upper = subject.upper()
-
-        if "HC" in subject_upper:
-            return "HC"
-
-        if "TBI" in subject_upper:
-            return "TBI"
-
-        return "N/A"
+    def _read_json(path: Path) -> Dict:
+        if not path.is_file():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return payload if isinstance(payload, dict) else {}
+        except (OSError, ValueError):
+            return {}
 
     def _validate_paths(self) -> None:
         """Validate required folders and create the output folder"""
@@ -194,6 +210,21 @@ class MotorImageryPdfReport:
             "output_pdf": str(self.output_path),
             "report_title": self.report_title,
             "report_name": self.base_name,
+            "report_id": self.report_id,
+            "package_version": self.version,
+            "recording_id": self.recording_id,
+            "subject_id": self.sub_name,
+            "session_id": self.ses_name,
+            "run_id": self.run_name,
+            "recording_date": self.date_test,
+            "recording_timestamp": self.recording_timestamp,
+            "recording_date_source": clean(self.recording_metadata.get("recording_date_source")),
+            "generated_at": self.generated_at,
+            "spatial_filter": self.spatial_filter,
+            "psd_resolution_hz": self.resolution,
+            "analysis_parameters": self.analysis_parameters,
+            "recording_metadata": self.recording_metadata,
+            "analysis_warnings": self.analysis_warnings,
             "subject": self.sub_name,
             "session": self.ses_name,
             "date_test": self.date_test,
@@ -208,7 +239,7 @@ class MotorImageryPdfReport:
         path = self.save_folder / "pdf_report_generation_metadata.json"
         try:
             with open(path, "w") as fh:
-                json.dump(payload, fh, indent=2)
+                json.dump(payload, fh, indent=2, default=str)
         except Exception as exc:
             self._log(f"Could not write PDF metadata JSON: {exc}")
 
@@ -304,6 +335,8 @@ class MotorImageryPdfReport:
     def _create_canvas(self) -> None:
         """Create a ReportLab canvas"""
         self.c = canvas.Canvas(str(self.output_path), pagesize=letter)
+        self.c.setTitle(self.report_title)
+        self.c.setSubject(f"Recording: {self.recording_id}; report ID: {self.report_id}")
 
     def _next_page(self) -> None:
         """Force the document to create a new page"""
@@ -641,117 +674,49 @@ class MotorImageryPdfReport:
     # ------------------------------------------------------------------
     # Header
     # ------------------------------------------------------------------
+    def _fit_text(self, value: str, x: float, y: float, width: float, size: float = 9, bold: bool = False) -> None:
+        """Fit text inside its allocated column without clipping adjacent fields"""
+        font = "Helvetica-Bold" if bold else "Helvetica"
+        text = str(value).replace("\n", " ").replace("\r", " ")
+        measured = self.c.stringWidth(text, font, size)
+        if measured > width:
+            size *= width / measured
+        self.c.setFont(font, size)
+        self.c.drawString(x, y, text)
+
+    @staticmethod
+    def _format_number(value, suffix: str = "") -> str:
+        try:
+            return f"{float(value):g}{suffix}"
+        except (ValueError, TypeError):
+            return "N/A"
+
     def _generate_header(self) -> None:
-        """Populate header with subject and measurement information"""
-        y0 = 15
-        dx = 10
+        """Show recording identity and actual analysis settings on every page"""
+        left, top = self.top_left
+        right = self.top_right[0]
+        width = right - left
+        col = width / 3
+        self.c.setFillColor(colors.black)
+        self._fit_text(self.report_title, left, top - 12, width, 15, True)
+        self._fit_text(f"Recording ID: {self.recording_id}", left, top - 24, width, 9, True)
 
-        self._write_text(
-            [self.report_title],
-            self.canvas_dim["xmid"],
-            self.move_down_by(self.dict_alph["I"][1], y0),
-            font_size=17,
-            bold_flags=[True],
-            align="center",
-        )
-        self._write_text(
-            [f"Generated: {self.formatted_date}"],
-            self.top_right[0],
-            self.move_down_by(self.dict_alph["I"][1], y0),
-            font_size=11,
-            bold_flags=[False],
-            align="right",
-        )
-        self._write_text(
-            [f"Version: {self.version}"],
-            self.top_right[0],
-            self.move_down_by(self.move_down_by(self.dict_alph["I"][1], y0), y0),
-            font_size=10,
-            bold_flags=[False],
-            align="right",
-        )
-
-        font_size = 11
-        header_height = self.move_down_by(self.dict_alph["I"][1], 15) - self.move_up_by(
-            self.dict_alph["J"][1], 5
-        )
-        dy = header_height / 3
-
-        self._write_text(
-            ["Subject: ", self.sub_name],
-            self.canvas_dim["xmid"] * 2 / 3 - dx,
-            self.move_down_by(self.dict_alph["I"][1], y0 + dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="right",
-        )
-        self._write_text(
-            ["Session: ", self.ses_name],
-            self.canvas_dim["xmid"] * 2 / 3 - dx,
-            self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="right",
-        )
-        self._write_text(
-            ["Date of assessment: ", self.date_test],
-            self.canvas_dim["xmid"] * 2 / 3 - dx,
-            self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="right",
-        )
-
-        self._write_text(
-            ["Age at test: ", f"{self.age_at_test} "],
-            self.canvas_dim["xmid"],
-            self.move_down_by(self.dict_alph["I"][1], y0 + dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="center",
-        )
-        self._write_text(
-            ["Condition: ", f"{self.condition} "],
-            self.canvas_dim["xmid"],
-            self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="center",
-        )
-        self._write_text(
-            ["Montage: ", self.montage_name],
-            self.canvas_dim["xmid"],
-            self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="center",
-        )
-
-        right_column_x = self.canvas_dim["xmid"] * 2 * 2 / 3 + dx
-        self._write_text(
-            ["Resolution: ", f"{self.resolution} Hz"],
-            right_column_x,
-            self.move_down_by(self.dict_alph["I"][1], y0 + dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="left",
-        )
-        self._write_text(
-            ["Spatial filter: ", self.spatial_filter],
-            right_column_x,
-            self.move_down_by(self.dict_alph["I"][1], y0 + 2 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="left",
-        )
-        self._write_text(
-            ["Filter: ", "1-40 Hz"],
-            right_column_x,
-            self.move_down_by(self.dict_alph["I"][1], y0 + 3 * dy),
-            font_size=font_size,
-            bold_flags=[False, True],
-            align="left",
-        )
+        hp = self.analysis_parameters.get("highpass", self.recording_metadata.get("highpass"))
+        lp = self.analysis_parameters.get("lowpass", self.recording_metadata.get("lowpass"))
+        filter_range = f"{self._format_number(hp)}-{self._format_number(lp)} Hz" if known(hp) and known(lp) else "N/A"
+        sfreq = self.analysis_parameters.get("sfreq", self.recording_metadata.get("sfreq"))
+        generated = self.formatted_date + " UTC"
+        rows = [
+            (f"Subject ID: {self.sub_name}", f"Session: {self.ses_name}   Run: {self.run_name}", f"Generated: {generated}"),
+            (f"Recording date: {self.date_test}", f"Age at test: {self.age_at_test}   Condition: {self.condition}", f"Montage: {self.montage_name}"),
+            (f"Sampling: {self._format_number(sfreq, ' Hz')}   Filter: {filter_range}", f"Spatial filter: {self.spatial_filter}", f"PSD resolution: {self._format_number(self.resolution, ' Hz/bin')}"),
+        ]
+        for i, row in enumerate(rows):
+            for j, value in enumerate(row):
+                self._fit_text(value, left + j * col, top - 35 - 10 * i, col - 8, 8.5)
+        self.c.setFont("Helvetica", 7)
+        self.c.drawRightString(right, top - 65, f"Page {self.c.getPageNumber()} / 3")
+        self.draw_hline(left, right, self.dict_alph["J"][1], colors.lightgrey, line_width=0.5, return_coord=False)
 
     # ------------------------------------------------------------------
     # Page 1
@@ -919,6 +884,11 @@ class MotorImageryPdfReport:
         width = 200
         narrow_width = int(width * 0.85)
 
+        # Fit the spectra to three non-overlapping rows without stretching the plots
+        # Keep the center-row inner edges aligned with the original guide lines
+        outer_height = 218
+        middle_height = 230
+
         self._draw_plot(
             "psd_fc3.svg",
             x=self.move_right_by(self.canvas_dim["xmid"], 30),
@@ -926,14 +896,16 @@ class MotorImageryPdfReport:
             x_anchor="left",
             y_anchor="top",
             width=narrow_width,
+            height=outer_height,
         )
         self._draw_plot(
             "psd_c3.svg",
-            x=self.move_left_by(self.canvas_dim["xright"], 20),
+            x=self.move_left_by(self.canvas_dim["xright"], 20 + width),
             y=self.move_up_by(y_mid, 10),
-            x_anchor="right",
+            x_anchor="left",
             y_anchor="center",
             width=width,
+            height=middle_height,
         )
         self._draw_first_existing_plot(
             [
@@ -945,16 +917,18 @@ class MotorImageryPdfReport:
                         "x_anchor": "left",
                         "y_anchor": "bottom",
                         "width": narrow_width,
+                        "height": outer_height,
                     },
                 ),
                 (
                     "psd_cp3.svg",
                     {
-                        "x": self.move_left_by(self.canvas_dim["xmid"], 30),
+                        "x": self.move_right_by(self.canvas_dim["xmid"], 30),
                         "y": self.move_up_by(self.canvas_dim["ybottom"], 5),
-                        "x_anchor": "right",
+                        "x_anchor": "left",
                         "y_anchor": "bottom",
                         "width": narrow_width,
+                        "height": outer_height,
                     },
                 ),
             ]
@@ -967,14 +941,16 @@ class MotorImageryPdfReport:
             x_anchor="right",
             y_anchor="top",
             width=narrow_width,
+            height=outer_height,
         )
         self._draw_plot(
             "psd_c4.svg",
-            x=self.move_right_by(self.canvas_dim["xleft"], 20),
+            x=self.move_right_by(self.canvas_dim["xleft"], 20 + width),
             y=self.move_up_by(y_mid, 10),
-            x_anchor="left",
+            x_anchor="right",
             y_anchor="center",
             width=width,
+            height=middle_height,
         )
         self._draw_first_existing_plot(
             [
@@ -986,6 +962,7 @@ class MotorImageryPdfReport:
                         "x_anchor": "right",
                         "y_anchor": "bottom",
                         "width": narrow_width,
+                        "height": outer_height,
                     },
                 ),
                 (
@@ -996,6 +973,7 @@ class MotorImageryPdfReport:
                         "x_anchor": "right",
                         "y_anchor": "bottom",
                         "width": narrow_width,
+                        "height": outer_height,
                     },
                 ),
             ]

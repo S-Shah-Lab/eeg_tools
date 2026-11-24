@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from .BridgingChecker import BridgingChecker
-from .RawImporter import EEGRawImporter
-
-HELPER_DIR = Path(__file__).resolve().parent / "helper"
+if __package__:
+    from .BridgingChecker import BridgingChecker
+    from .RawImporter import EEGRawImporter
+else:
+    from BridgingChecker import BridgingChecker
+    from RawImporter import EEGRawImporter
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -17,7 +19,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument("--file-path", required=True, help="Path to the input .dat file")
-    parser.add_argument("--helper-dir", default=str(HELPER_DIR), help="Folder containing helper montage files")
+    parser.add_argument("--helper-dir", default=str(Path(__file__).resolve().parent / "helper"), help="Folder containing helper montage files")
     parser.add_argument("--save-path", required=True, help="Base folder where bridging outputs are saved")
 
     parser.add_argument("--fmin", type=float, default=1.0, help="Band-pass low cutoff in Hz")

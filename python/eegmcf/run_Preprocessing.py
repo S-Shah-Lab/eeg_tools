@@ -7,10 +7,18 @@ from typing import Any
 
 import mne
 
-from .Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
-from .RawImporter import EEGRawImporter
+if __package__:
+    from .Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
+    from .RawImporter import EEGRawImporter
+else:
+    from Preprocessing import EEGPreprocessor, EEGPreprocessorConfig
+    from RawImporter import EEGRawImporter
 
-HELPER_DIR = Path(__file__).resolve().parent / "helper"
+
+if __package__:
+    from .RecordingMetadata import add_metadata_arguments, apply_overrides, metadata_from_raw, spatial_filter_label
+else:
+    from RecordingMetadata import add_metadata_arguments, apply_overrides, metadata_from_raw, spatial_filter_label
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -22,7 +30,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument("--file-path", required=True, help="Path to the input .dat file")
-    parser.add_argument("--helper-dir", default=str(HELPER_DIR), help="Folder containing helper montage files")
+    parser.add_argument("--helper-dir", default=str(Path(__file__).resolve().parent / "helper"), help="Folder containing helper montage files")
     parser.add_argument(
         "--keep-stim",
         action=argparse.BooleanOptionalAction,
@@ -73,8 +81,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--reref-channels",
-        default="tp9 tp10",
-        help="Space-separated channel names to use for re-referencing",
+        default="auto",
+        help="Space-separated reference channels, or auto (TP9/TP10 when present; otherwise retain acquisition reference)",
     )
     parser.add_argument(
         "--reset-bads-after-interp",
@@ -119,6 +127,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Overwrite an existing cleaned Raw cache",
     )
 
+    add_metadata_arguments(parser)
     return parser
 
 
@@ -310,6 +319,9 @@ def run_pipeline(args: argparse.Namespace) -> tuple[mne.io.BaseRaw, dict[str, An
     raw = importer.raw
     ch_set = importer.ch_set
     montage_type = _safe_montage_type(importer, args.montage_type)
+    if args.montage_type and args.montage_type != importer.montage.get("montage_type"):
+        raise ValueError("--montage-type does not match the inferred DAT montage")
+    recording_metadata = apply_overrides(metadata_from_raw(raw, file_path, {key: value for key, value in importer.stream.items() if key not in {"signal", "states", "ch_names"}}), args)
     aux_source_channels = list(getattr(importer, "montage", {}).get("aux_source_channels", []))
     config = _build_config(args)
     _print_raw_summary(raw, "\nImported raw summary", quiet=args.quiet)
@@ -360,9 +372,10 @@ def run_pipeline(args: argparse.Namespace) -> tuple[mne.io.BaseRaw, dict[str, An
             else _default_cleaned_raw_output(file_path, save_path)
         )
         metadata = {
-            "source_file": str(file_path),
+            **recording_metadata,
+            "source_file": str(file_path.resolve()),
             "montage_type": montage_type,
-            "date_test": getattr(importer, "stream", {}).get("date_test", "N/A"),
+            "spatial_filter": spatial_filter_label(history),
             "dropped_source_channels": aux_source_channels,
             "n_channels": int(raw_out.info["nchan"]),
             "sfreq": float(raw_out.info["sfreq"]),

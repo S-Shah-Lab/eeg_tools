@@ -14,11 +14,16 @@ from typing import Any, Callable, Iterable, Iterator, Literal, Mapping, Optional
 
 import mne
 import numpy as np
-from BCI2000Tools.Electrodes import ChannelSet
-from mne.io import BaseRaw
-from pyprep.find_noisy_channels import NoisyChannels
+from typing import TYPE_CHECKING
 
-from .helper import eeg_dict
+if TYPE_CHECKING:
+    from BCI2000Tools.Electrodes import ChannelSet
+from mne.io import BaseRaw
+
+if __package__:
+    from .helper import eeg_dict
+else:
+    import helper.eeg_dict as eeg_dict
 
 
 StepName = Literal[
@@ -116,6 +121,8 @@ class EEGPreprocessor:
 
         self._cache_original_montage(raw)
         self._eeg_picks = mne.pick_types(self.raw.info, eeg=True, exclude=())
+        if [self.raw.ch_names[i].lower() for i in self._eeg_picks] != [str(name).lower() for name in self.ch_set.get_labels()]:
+            raise ValueError("Preprocessing EEG rows do not match ChannelSet order")
         if self._eeg_picks.size == 0:
             raise RuntimeError("No EEG channels found in Raw.info")
 
@@ -181,7 +188,11 @@ class EEGPreprocessor:
                 "status": "done",
                 "elapsed_sec": elapsed,
             }
-            if step_name == "annotation" and bool(params.get("plot", True)):
+            if step_name == "rereference" and self.history.get("rereference", {}).get("status") == "skipped":
+                step_record["status"] = "skipped"
+                step_record["reason"] = self.history["rereference"]["reason"]
+                self._log(f"[EEGPreprocessor] [{index}/{n_steps}] SKIPPED {label}: {step_record['reason']}")
+            elif step_name == "annotation" and bool(params.get("plot", True)):
                 step_record["elapsed_note"] = "includes manual inspection time"
                 self._log(f"[EEGPreprocessor] [{index}/{n_steps}] DONE {label}")
             else:
@@ -414,6 +425,11 @@ class EEGPreprocessor:
         if hf_noise_action not in {"review", "mark"}:
             raise ValueError("[PREP] hf_noise_action must be either 'review' or 'mark'")
 
+        try:
+            from pyprep.find_noisy_channels import NoisyChannels
+        except ImportError as exc:
+            raise ImportError("PREP requires PyPREP. Install eegmcf[raw] or explicitly select --no-prep") from exc
+
         raw_prep = self.raw.copy().pick(self._eeg_picks)
         nc = NoisyChannels(raw_prep, do_detrend=False, random_state=random_state)
         method_bads: dict[str, list[str]] = {}
@@ -490,6 +506,8 @@ class EEGPreprocessor:
             )
 
     def _run_prep_ransac(self, random_state: int) -> list[str]:
+        from pyprep.find_noisy_channels import NoisyChannels
+
         prev_bads = set(self.raw.info.get("bads", []))
         eeg_names = [self.raw.ch_names[idx] for idx in self._eeg_picks]
         good_eeg_names = [name for name in eeg_names if name not in prev_bads]
@@ -592,6 +610,10 @@ class EEGPreprocessor:
                 ch_types="eeg",
             )
             eeg_info["line_freq"] = old_info.get("line_freq", None)
+            eeg_info["subject_info"] = old_info.get("subject_info")
+            with eeg_info._unlock():
+                eeg_info["highpass"] = old_info["highpass"]
+                eeg_info["lowpass"] = old_info["lowpass"]
             raw_eeg = mne.io.RawArray(
                 signal_new,
                 eeg_info,
@@ -628,9 +650,17 @@ class EEGPreprocessor:
     def _apply_rereference(self, params: Mapping[str, Any]) -> None:
         """Apply re-referencing using ChannelSet.RerefMatrix."""
         channels = params.get("channels")
+        if channels == "auto":
+            available = {str(name).lower() for name in self.ch_set.get_labels()}
+            if not {"tp9", "tp10"}.issubset(available):
+                self.history["rereference"] = {"status": "skipped", "reason": "TP9/TP10 not available; acquisition reference retained"}
+                self._log("[EEGPreprocessor warning] TP9/TP10 unavailable; retaining acquisition reference. Set --reref-channels explicitly if appropriate")
+                return
+            channels = "tp9 tp10"
         if channels is None:
             raise ValueError("[Re-reference] 'channels' must be provided")
 
+        self._require_resolved_bad_channels("Re-reference")
         matrix = np.asarray(self.ch_set.RerefMatrix(channels))
         eeg_data = self.raw.get_data(picks=self._eeg_picks)
         self._validate_projection_matrix(matrix, eeg_data, "Re-reference")
@@ -650,6 +680,7 @@ class EEGPreprocessor:
 
     def _apply_spatialfilter(self, params: Mapping[str, Any]) -> None:
         """Apply spatial filtering using ChannelSet.SLAP."""
+        self._require_resolved_bad_channels("Spatial filter")
         exclude = params.get("exclude")
         matrix = np.asarray(self.ch_set.SLAP(exclude=exclude)) if exclude else np.asarray(self.ch_set.SLAP())
         eeg_data = self.raw.get_data(picks=self._eeg_picks)
@@ -667,6 +698,12 @@ class EEGPreprocessor:
             f"[EEGPreprocessor] Spatial filter EEG channels: "
             f"{eeg_data.shape[0]} -> {signal_new.shape[0]}"
         )
+
+    def _require_resolved_bad_channels(self, step_label):
+        # A spatial projection can spread bad EEG into otherwise usable channels
+        bads = set(self.raw.info.get("bads", [])).intersection(self.raw.ch_names[i] for i in self._eeg_picks)
+        if bads:
+            raise ValueError(f"[{step_label}] Unresolved EEG bad channels: {sorted(bads)}; interpolate and reset bad flags before projecting")
 
     @staticmethod
     def _validate_projection_matrix(matrix: np.ndarray, eeg_data: np.ndarray, step_label: str) -> None:

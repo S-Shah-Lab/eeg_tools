@@ -42,7 +42,10 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     try:
-        from .RawImporter import EEGRawImporter
+        if __package__:
+            from .RawImporter import EEGRawImporter
+        else:
+            from RawImporter import EEGRawImporter
     except Exception as exc:
         parser.exit(status=1, message=f"[run_RawImporter] ERROR: could not import dependencies: {exc}\n")
 

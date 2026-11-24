@@ -1755,139 +1755,22 @@ def process_psd_file(
 # Run script
 # =============================================================================
 
+def main(argv=None):
+    """Fit the selected 1/f background models to a PSD long-format CSV"""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Aggregate PSDs and fit 1/f background models")
+    parser.add_argument("--input-csv", required=True, type=Path)
+    parser.add_argument("--plot-channels", default="c3,c4", help="Comma-separated channels, 'all' or 'false'")
+    args = parser.parse_args(argv)
+    value = args.plot_channels.strip().lower()
+    channels = False if value == "false" else None if value == "all" else [ch.strip() for ch in value.split(",") if ch.strip()]
+    result = process_psd_file(input_csv=args.input_csv, plot_channels=channels)
+    for key in ("aggregated_csv", "best_fit_csv", "fit_summary_csv", "peak_summary_csv", "peak_group_summary_csv"):
+        print(f"{key}: {result[key]}")
+    for path in result["plot_paths"]:
+        print(f"Plot: {path}")
+
+
 if __name__ == "__main__":
-
-    base_dir = Path("/mnt/c/Users/scana/Desktop/motorimagery_result_test")
-
-    files = [
-        #"sub-PDHC001_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC002_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC003_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC004_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC005_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC006_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC007_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC008_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC009_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC010_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC011_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC012_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC013_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC014_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC015_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC016_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC017_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC018_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC019_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC020_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC021_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC022_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC023_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC024_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC025_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC026_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC027_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC028_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC029_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC030_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC031_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC032_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC033_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC034_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC035_ses-01_task-MotorImag_run-01",
-        #"sub-PDHC036_ses-01_task-MotorImag_run-01",
-        "sub-PDHC038_ses-01_task-MotorImag_run-01",
-        "sub-PDHC039_ses-01_task-MotorImag_run-01",
-    ]
-
-    input_filename = "psd_long_format.csv"
-
-    # Use a list to plot specific channels
-    #plot_channels = ["c1", "c3", "cp1", "c2", "c4", "cp2"]
-    plot_channels = ["c3", "c4"]
-
-    # Use None to plot all available channels
-    # plot_channels = None
-
-    # Use False to disable plotting
-    # plot_channels = False
-
-    plot_condition = None
-
-    fit_freq_min = 1.0
-    fit_freq_max = 40.0
-
-    alpha_mu_guess = 10.0
-    beta_mu_guess = 20.0
-
-    alpha_mu_bounds = (7.5, 13.0)
-    beta_mu_bounds = (14.0, 30.0)
-
-    alpha_sigma_bounds = (0.5, 2.5)
-    beta_sigma_bounds = (0.5, 4.0)
-
-    amp_bounds = (0.0, 30.0)
-
-    use_sem_weights = True
-
-    min_peak_amp_db = 0.5
-    boundary_tol_hz = 0.05
-    min_delta_aic_for_extra_peak = 3.0
-
-    for subject in files:
-
-        input_csv = base_dir / subject / "csv" / input_filename
-
-        print("\n" + "=" * 80)
-        print(f"Subject: {subject}")
-        print(f"Input:   {input_csv}")
-
-        if not input_csv.exists():
-            print(f"Skipping missing file: {input_csv}")
-            continue
-
-        results = process_psd_file(
-            input_csv=input_csv,
-            output_aggregated_csv="psd_long_format_aggregated.csv",
-            output_best_fit_csv="psd_long_format_aggregated_best_fit.csv",
-            output_fit_summary_csv="psd_fit_summary_all_models.csv",
-            output_peak_summary_csv="psd_selected_gaussian_peak_summary.csv",
-            output_peak_group_summary_csv="psd_selected_gaussian_peak_group_summary.csv",
-            plot_channels=plot_channels,
-            plot_condition=plot_condition,
-            plot_folder_name="psd_best_fit_plots",
-            fit_freq_min=fit_freq_min,
-            fit_freq_max=fit_freq_max,
-            alpha_mu_guess=alpha_mu_guess,
-            beta_mu_guess=beta_mu_guess,
-            alpha_mu_bounds=alpha_mu_bounds,
-            beta_mu_bounds=beta_mu_bounds,
-            alpha_sigma_bounds=alpha_sigma_bounds,
-            beta_sigma_bounds=beta_sigma_bounds,
-            amp_bounds=amp_bounds,
-            use_sem_weights=use_sem_weights,
-            min_peak_amp_db=min_peak_amp_db,
-            boundary_tol_hz=boundary_tol_hz,
-            min_delta_aic_for_extra_peak=min_delta_aic_for_extra_peak,
-        )
-
-        print(f"Saved aggregated CSV:            {results['aggregated_csv']}")
-        print(f"Saved best-fit CSV:              {results['best_fit_csv']}")
-        print(f"Saved fit-summary CSV:           {results['fit_summary_csv']}")
-        print(f"Saved peak-summary CSV:          {results['peak_summary_csv']}")
-        print(f"Saved peak-group-summary CSV:    {results['peak_group_summary_csv']}")
-
-        selected_counts = (
-            results["fit_summary_df"]
-            .query("is_selected_best_model == True")
-            ["model_name"]
-            .value_counts()
-        )
-
-        print("\nSelected model counts:")
-        print(selected_counts.to_string())
-
-        for plot_path in results["plot_paths"]:
-            print(f"Saved plot:                      {plot_path}")
-
-    print("\nDone")
+    main()
